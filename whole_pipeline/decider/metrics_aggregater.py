@@ -143,6 +143,7 @@ class MetricsAggregator:
         
         # 使用 embedding 模型
         if self.use_embedding and self.embedding_model:
+            print("using embedding!!!")
             try:
                 embeddings = self.embedding_model.encode([text1, text2])
                 # 计算余弦相似度
@@ -1082,7 +1083,7 @@ def main():
         score_diff_threshold=2.5,
         similarity_threshold=args.similarity_threshold,
         general_similarity_threshold=args.general_sim_threshold,
-        use_embedding=False,  # 默认关闭，环境可用时可自行开启
+        use_embedding=True,  # 默认关闭，环境可用时可自行开启
     )
 
     samples_metrics, hard_cases = processor.process_file_per_sample(
@@ -1126,3 +1127,15 @@ def main():
         output_dir,
     )
 
+if __name__=="__main__":
+    main()
+
+# /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/d_extracted_sample_data/extra_evaluation.json
+
+# python metrics_aggregater.py /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/d_extracted_sample_data/extra_evaluation.json \
+#     --output-dir /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/e_aggregated_data \
+#     --include-hard-in-samples \
+#     --similarity-threshold 0.75 \
+#     --general-sim-threshold 0.80 \
+#     --global-sim-threshold 0.65 \
+#     --global-general-sim-threshold 0.75

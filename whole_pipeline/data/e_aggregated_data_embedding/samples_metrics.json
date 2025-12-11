@@ -1,0 +1,119 @@
+[
+  {
+    "sample_id": "7",
+    "merged_metrics": [
+      {
+        "general": "Object Recognition Accuracy",
+        "specific": [
+          "Whether the answer correctly identifies and describes the objects present in the images (e.g., stuffed animals, food items, airplane interior)."
+        ]
+      },
+      {
+        "general": "Contextual Understanding",
+        "specific": [
+          "Whether the answer accurately interprets the context of the scene and the relationships between the objects (e.g., stuffed animals as travel companions, dining on an airplane)."
+        ]
+      },
+      {
+        "general": "Activity Inference",
+        "specific": [
+          "Whether the answer correctly infers the activities taking place based on the visual cues in the images (e.g., dining, entertainment)."
+        ]
+      },
+      {
+        "general": "Multi-image contextual synthesis",
+        "specific": [
+          "Whether the answer effectively combines details and inferences from all provided images to form a cohesive and comprehensive description of the overall scenario."
+        ]
+      },
+      {
+        "general": "Detailed object and attribute identification",
+        "specific": [
+          "Whether the answer accurately identifies specific objects (e.g., types of stuffed animals) and their distinguishing attributes (e.g., chef's hat, flower accessory) within the images."
+        ]
+      },
+      {
+        "general": "Inference of activities and relationships",
+        "specific": [
+          "Whether the answer correctly infers activities (e.g., dining, in-flight entertainment) and the relationships between subjects (e.g., travel companions) based on the visual context."
+        ]
+      },
+      {
+        "general": "Multi-image narrative synthesis",
+        "specific": [
+          "Whether the answer correctly integrates details from all provided images to form a coherent description of the overall event."
+        ]
+      },
+      {
+        "general": "Visual-based activity inference",
+        "specific": [
+          "Whether the answer accurately infers activities by connecting objects, people, and context depicted across the images."
+        ]
+      },
+      {
+        "general": "Structured and comprehensive response",
+        "specific": [
+          "Whether the answer is organized logically (e.g., using headings/lists) and provides a detailed breakdown of the scene and activities."
+        ]
+      }
+    ],
+    "difficulty_score": 0.15749579113843054,
+    "confidence_score": 0.9227769290508362,
+    "correctness_std": 0.0,
+    "training_std": 0.23570226039551584
+  },
+  {
+    "sample_id": "1",
+    "merged_metrics": [
+      {
+        "general": "Accuracy of cross-modal entity verification",
+        "specific": [
+          "Whether the answer correctly verifies the presence or absence of specific entities (characters) across both provided images."
+        ]
+      },
+      {
+        "general": "Completeness in multimodal set operations",
+        "specific": [
+          "Whether the answer includes all items that satisfy the logical condition (intersection of characters) described in the question."
+        ]
+      },
+      {
+        "general": "Factual accuracy in multi-entity identification",
+        "specific": [
+          "Whether the list of entities provided in the answer is factually correct and free from hallucinations or omissions."
+        ]
+      }
+    ],
+    "difficulty_score": 2.8149598541380874,
+    "confidence_score": 0.580201220740381,
+    "correctness_std": 1.6499158227686108,
+    "training_std": 2.3213980461973533
+  },
+  {
+    "sample_id": "17",
+    "merged_metrics": [
+      {
+        "general": "Cross-image information synthesis accuracy",
+        "specific": [
+          "Whether the answer correctly identifies and consistently describes the same objects across multiple images, avoiding contradictions in location or description."
+        ]
+      },
+      {
+        "general": "Fine-grained visual feature interpretation",
+        "specific": [
+          "Whether the answer accurately interprets subtle but defining visual features of an object rather than mischaracterizing them (e.g., mistaking facial markings for glasses)."
+        ]
+      },
+      {
+        "general": "Factual grounding and hallucination avoidance",
+        "specific": [
+          "Whether all claims about the presence and location of objects in the answer are directly verifiable from the visual evidence in the images."
+        ]
+      }
+    ],
+    "difficulty_score": 4.111905055196333,
+    "confidence_score": 0.5273789067712239,
+    "correctness_std": 3.009245014211298,
+    "training_std": 2.953340857778225
+  }
+]

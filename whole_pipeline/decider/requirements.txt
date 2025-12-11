@@ -1,0 +1,79 @@
+aiodns @ file:///home/task_176218489323204/conda-bld/aiodns_1762184939227/work
+aiohappyeyeballs @ file:///croot/aiohappyeyeballs_1755769838153/work
+aiohttp @ file:///home/task_176251938616281/conda-bld/aiohttp_1762519754880/work
+aiosignal @ file:///croot/aiosignal_1755870803324/work
+annotated-types==0.7.0
+anyio @ file:///home/task_175862240021031/conda-bld/anyio_1758622416828/work
+async-timeout @ file:///croot/async-timeout_1732661977001/work
+attrs @ file:///home/task_176235654773823/conda-bld/attrs_1762356879185/work
+Bottleneck @ file:///home/task_176193794808509/conda-bld/bottleneck_1761937988290/work
+brotlicffi @ file:///home/task_176496125431831/conda-bld/brotlicffi_1764961387175/work
+certifi @ file:///home/task_176313475725006/conda-bld/certifi_1763135328462/work/certifi
+cffi @ file:///home/task_176183215827778/conda-bld/cffi_1761832774246/work
+charset-normalizer @ file:///home/task_176174482135433/conda-bld/charset-normalizer_1761744871447/work
+datasets @ file:///home/task_176493281306318/conda-bld/datasets_1764933296253/work
+dill @ file:///home/task_176009671811890/conda-bld/dill_1760096782598/work
+distro==1.9.0
+exceptiongroup @ file:///home/task_176156033398806/conda-bld/exceptiongroup_1761560346388/work
+filelock @ file:///home/task_176241979569947/conda-bld/filelock_1762419849833/work
+frozenlist @ file:///home/task_176106151538220/conda-bld/frozenlist_1761062012686/work
+fsspec @ file:///home/task_176243241290652/conda-bld/fsspec_1762432433174/work
+h11 @ file:///home/task_176193128294608/conda-bld/h11_1761931294516/work
+h5py @ file:///home/task_176399673022352/conda-bld/h5py_1763997334883/work
+hf-xet @ file:///croot/hf-xet_1755725946166/work
+httpcore @ file:///croot/httpcore_1748526048470/work
+httpx @ file:///home/task_176044729065927/conda-bld/httpx_1760447346377/work
+huggingface_hub @ file:///croot/huggingface_hub_1755770845667/work
+idna @ file:///home/task_176191177045451/conda-bld/idna_1761911980742/work
+Jinja2==3.1.6
+jiter==0.12.0
+joblib==1.5.2
+MarkupSafe==3.0.3
+mkl-service==2.5.2
+mkl_fft @ file:///home/task_176159252575002/conda-bld/mkl_fft_1761592901585/work
+mkl_random @ file:///home/task_176159293813909/conda-bld/mkl_random_1761592952512/work
+mpi4py @ file:///croot/mpi4py_1749458488241/work
+mpmath==1.3.0
+multidict @ file:///home/task_176056679722681/conda-bld/multidict_1760566849732/work
+multiprocess @ file:///home/task_176112142304106/conda-bld/multiprocess_1761121467866/work
+networkx==3.4.2
+numexpr @ file:///home/task_176216559424661/conda-bld/numexpr_1762165604917/work
+numpy==1.26.4
+openai==2.9.0
+opencv-python-headless==4.8.1.78
+packaging @ file:///home/task_176104877067765/conda-bld/packaging_1761049113113/work
+pandas @ file:///home/task_176233228161209/conda-bld/pandas_1762332325727/work/dist/pandas-2.3.3-cp310-cp310-linux_x86_64.whl#sha256=cd4241f338dbf9922b2bc5a62ff6267574e607e9e9ea8b5efbba07b037c96f8f
+pillow==12.0.0
+propcache @ file:///croot/propcache_1744012718189/work
+pyarrow @ file:///home/task_176493930482921/conda-bld/pyarrow_1764939448836/work/python
+pycares @ file:///croot/pycares_1756217929773/work
+pycparser @ file:///home/task_175749556993857/conda-bld/pycparser_1757496041120/work
+pydantic==2.12.5
+pydantic_core==2.41.5
+PySocks @ file:///home/task_176175228103966/conda-bld/pysocks_1761753009555/work
+python-dateutil @ file:///croot/python-dateutil_1716495738603/work
+pytz @ file:///croot/pytz_1752135852232/work
+PyYAML @ file:///home/task_176346546342115/conda-bld/pyyaml_1763465494987/work
+regex @ file:///home/task_175888776964467/conda-bld/regex_1758887948935/work
+requests @ file:///home/task_176235919024464/conda-bld/requests_1762359590301/work
+safetensors @ file:///home/task_176251527155138/conda-bld/safetensors_1762515996253/work
+scikit-learn==1.2.2
+scipy==1.15.3
+six @ file:///croot/six_1744271502820/work
+sniffio @ file:///home/task_176432908282699/conda-bld/sniffio_1764329151716/work
+sympy==1.14.0
+threadpoolctl==3.6.0
+tokenizers==0.13.3
+torch==2.1.0+cu118
+torchaudio==2.1.0+cu118
+torchvision==0.16.0+cu118
+tqdm @ file:///home/task_176286294819792/conda-bld/tqdm_1762863351923/work
+transformers==4.32.0
+triton==2.1.0
+typing-inspection==0.4.2
+typing_extensions @ file:///croot/typing_extensions_1756280817316/work
+tzdata @ file:///croot/python-tzdata_1746123641790/work
+urllib3 @ file:///home/task_176539906038445/conda-bld/urllib3_1765399193651/work
+uvloop @ file:///home/task_176217535403751/conda-bld/uvloop_1762175503684/work
+xxhash @ file:///croot/python-xxhash_1737039434400/work
+yarl @ file:///home/task_176224977625608/conda-bld/yarl_1762250153055/work

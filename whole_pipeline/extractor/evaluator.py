@@ -998,6 +998,178 @@ Please return the evaluation results in JSON format:
             logger.error(f"Model call failed: {e}")
             return self._generate_fallback_response()
     
+    # async def _call_api_model(
+    #     self,
+    #     model_config: ModelConfig,
+    #     prompt: str,
+    #     image_data: Optional[List[str]] = None
+    # ) -> Dict:
+    #     """调用API模型（参考 api_client.py 的实现方式）"""
+    #     # 记录请求信息（用于错误诊断）
+    #     request_info = {
+    #         "model": model_config.name,
+    #         "endpoint": model_config.api_endpoint,
+    #         "prompt_length": len(prompt),
+    #         "image_count": len(image_data) if image_data else 0,
+    #         "max_tokens": model_config.max_tokens,
+    #         "temperature": model_config.temperature
+    #     }
+        
+    #     try:
+    #         from openai import AsyncOpenAI
+    #         from PIL import Image
+    #         from io import BytesIO
+    #         import base64
+            
+    #         logger.info(f"Calling API model {model_config.name} for evaluation...")
+    #         logger.debug(f"API endpoint: {model_config.api_endpoint}")
+    #         logger.debug(f"Prompt length: {len(prompt)} chars, Images: {len(image_data) if image_data else 0}")
+    #         logger.debug(f"Request parameters: max_tokens={model_config.max_tokens}, temperature={model_config.temperature}")
+            
+    #         # 构建消息内容（参考 api_client.py 的 _build_messages 方法）
+    #         content = []
+            
+    #         if image_data:
+    #             # 处理图片：将 base64 字符串转换为 Image 对象，然后重新编码（与 api_client.py 保持一致）
+    #             for img_b64 in image_data:
+    #                 try:
+    #                     # 解码 base64 字符串
+    #                     img_bytes = base64.b64decode(img_b64)
+    #                     # 转换为 PIL Image
+    #                     img = Image.open(BytesIO(img_bytes))
+    #                     # 确保是 RGB 模式
+    #                     if img.mode != 'RGB':
+    #                         img = img.convert('RGB')
+                        
+    #                     # 重新编码为 base64（与 api_client.py 保持一致）
+    #                     buffered = BytesIO()
+    #                     img.save(buffered, format="JPEG", quality=85)
+    #                     img_b64_encoded = base64.b64encode(buffered.getvalue()).decode("utf-8")
+                        
+    #                     content.append({
+    #                         "type": "image_url",
+    #                         "image_url": {"url": f"data:image/jpeg;base64,{img_b64_encoded}"}
+    #                     })
+    #                 except Exception as e:
+    #                     logger.warning(f"Failed to process image: {e}")
+    #                     # 如果处理失败，直接使用原始 base64
+    #                     content.append({
+    #                         "type": "image_url",
+    #                         "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}
+    #                     })
+            
+    #         # 添加文本提示
+    #         content.append({"type": "text", "text": prompt})
+            
+    #         # 构建消息（与 api_client.py 保持一致）
+    #         messages = [{"role": "user", "content": content}]
+            
+    #         # 验证 API key 是否存在
+    #         if not model_config.api_key or model_config.api_key == "NOT SET" or len(model_config.api_key.strip()) == 0:
+    #             error_msg = (
+    #                 f"API key is not set for model {model_config.name}\n"
+    #                 f"Request info: {request_info}\n"
+    #                 f"Please check config.json and ensure api_key is set"
+    #             )
+    #             logger.error(error_msg)
+    #             return self._generate_fallback_response()
+            
+    #         # 按照正确示例创建客户端
+    #         # config中的api_endpoint就是base_url，直接使用
+    #         base_url = model_config.api_endpoint.rstrip('/') if model_config.api_endpoint else None
+    #         if not base_url:
+    #             logger.error(f"API endpoint is not set for model {model_config.name}")
+    #             return self._generate_fallback_response()
+            
+    #         # 如果base_url不以/v1结尾，自动添加（兼容旧配置）
+    #         if not base_url.endswith('/v1'):
+    #             base_url = base_url + '/v1'
+    #             logger.debug(f"自动添加 /v1 路径，使用 base_url: {base_url}")
+            
+    #         logger.debug(f"Using base_url: {base_url}")
+            
+    #         # 创建OpenAI异步客户端（按照用户提供的正确示例）
+    #         client = AsyncOpenAI(
+    #             api_key=model_config.api_key,
+    #             base_url=base_url
+    #         )
+            
+    #         logger.info(f"Sending request to {model_config.name}...")
+            
+    #         # 调用API（按照用户提供的正确示例格式）
+    #         response = await client.chat.completions.create(
+    #             model=model_config.name,
+    #             messages=messages,
+    #             max_tokens=model_config.max_tokens,
+    #             temperature=model_config.temperature
+    #         )
+            
+    #         result_text = response.choices[0].message.content
+    #         logger.info(f"API call successful, response length: {len(result_text)} chars")
+            
+    #         # 记录token使用情况（参考 api_client.py）
+    #         if hasattr(response, 'usage') and response.usage:
+    #             logger.info(f"Token usage: {response.usage.prompt_tokens} prompt + {response.usage.completion_tokens} completion = {response.usage.total_tokens} total")
+            
+    #         # 解析JSON响应
+    #         import re
+    #         json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
+    #         if json_match:
+    #             try:
+    #                 result_dict = json.loads(json_match.group())
+    #                 logger.debug("Successfully parsed JSON response")
+    #             except json.JSONDecodeError as e:
+    #                 logger.warning(f"Failed to parse JSON from response: {e}")
+    #                 logger.warning(f"Response text (first 500 chars): {result_text[:500]}")
+    #                 # 尝试解析整个响应
+    #                 try:
+    #                     result_dict = json.loads(result_text)
+    #                 except:
+    #                     logger.error("Failed to parse response as JSON, using fallback")
+    #                     return self._generate_fallback_response()
+    #         else:
+    #             # 尝试直接解析整个响应
+    #             try:
+    #                 result_dict = json.loads(result_text)
+    #             except json.JSONDecodeError as e:
+    #                 logger.error(f"Response is not valid JSON: {e}")
+    #                 logger.error(f"Response text (first 500 chars): {result_text[:500]}")
+    #                 return self._generate_fallback_response()
+            
+    #         return result_dict
+            
+    #     except ImportError as e:
+    #         error_msg = (
+    #             f"Missing required library: {e}\n"
+    #             f"Please install: pip install openai\n"
+    #             f"Request info: {request_info}"
+    #         )
+    #         logger.error(error_msg)
+    #         return self._generate_fallback_response()
+            
+    #     except Exception as api_error:
+    #         error_type = type(api_error).__name__
+    #         error_msg = (
+    #             f"API call error: {error_type}\n"
+    #             f"Error message: {str(api_error)}\n"
+    #             f"Request info: {request_info}\n"
+    #             f"API endpoint: {model_config.api_endpoint}\n"
+    #             f"Model: {model_config.name}\n"
+    #             f"API key: {'SET' if model_config.api_key else 'NOT SET'}\n"
+    #             f"Base URL: {base_url if 'base_url' in locals() else 'N/A'}"
+    #         )
+            
+    #         # 如果是 OpenAI API 特定错误，添加更多信息
+    #         if hasattr(api_error, 'response'):
+    #             error_msg += f"\nResponse status: {getattr(api_error.response, 'status_code', 'N/A')}"
+    #             error_msg += f"\nResponse body: {getattr(api_error.response, 'text', 'N/A')[:500]}"
+            
+    #         logger.error(error_msg)
+    #         import traceback
+    #         logger.debug(f"Full traceback:\n{traceback.format_exc()}")
+    #         return self._generate_fallback_response()
+
+
     async def _call_api_model(
         self,
         model_config: ModelConfig,
@@ -1020,6 +1192,7 @@ Please return the evaluation results in JSON format:
             from PIL import Image
             from io import BytesIO
             import base64
+            import asyncio
             
             logger.info(f"Calling API model {model_config.name} for evaluation...")
             logger.debug(f"API endpoint: {model_config.api_endpoint}")
@@ -1088,21 +1261,31 @@ Please return the evaluation results in JSON format:
             
             logger.debug(f"Using base_url: {base_url}")
             
-            # 创建OpenAI异步客户端（按照用户提供的正确示例）
+            # 创建OpenAI异步客户端（添加超时设置）
             client = AsyncOpenAI(
                 api_key=model_config.api_key,
-                base_url=base_url
+                base_url=base_url,
+                timeout=120.0,
+                max_retries=2
             )
             
             logger.info(f"Sending request to {model_config.name}...")
             
-            # 调用API（按照用户提供的正确示例格式）
-            response = await client.chat.completions.create(
-                model=model_config.name,
-                messages=messages,
-                max_tokens=model_config.max_tokens,
-                temperature=model_config.temperature
-            )
+            # 调用API（添加超时保护）
+            try:
+                response = await asyncio.wait_for(
+                    client.chat.completions.create(
+                        model=model_config.name,
+                        messages=messages,
+                        max_tokens=model_config.max_tokens,
+                        temperature=model_config.temperature
+                    ),
+                    timeout=300.0
+                )
+            except asyncio.TimeoutError:
+                error_msg = f"API request timed out after 300(yaun 150) seconds for model {model_config.name}"
+                logger.error(error_msg)
+                return self._generate_fallback_response()
             
             result_text = response.choices[0].message.content
             logger.info(f"API call successful, response length: {len(result_text)} chars")
@@ -1111,30 +1294,57 @@ Please return the evaluation results in JSON format:
             if hasattr(response, 'usage') and response.usage:
                 logger.info(f"Token usage: {response.usage.prompt_tokens} prompt + {response.usage.completion_tokens} completion = {response.usage.total_tokens} total")
             
-            # 解析JSON响应
+            # 优化的JSON解析逻辑
             import re
-            json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
-            if json_match:
-                try:
-                    result_dict = json.loads(json_match.group())
-                    logger.debug("Successfully parsed JSON response")
-                except json.JSONDecodeError as e:
-                    logger.warning(f"Failed to parse JSON from response: {e}")
-                    logger.warning(f"Response text (first 500 chars): {result_text[:500]}")
-                    # 尝试解析整个响应
+            
+            # 清理响应文本：移除markdown代码块标记
+            cleaned_text = result_text.strip()
+            
+            # 移除 ```json 或 ``` 包裹
+            if cleaned_text.startswith('```'):
+                # 移除开头的 ```json 或 ```
+                cleaned_text = re.sub(r'^```(?:json)?\s*\n?', '', cleaned_text)
+                # 移除结尾的 ```
+                cleaned_text = re.sub(r'\n?```\s*$', '', cleaned_text)
+                cleaned_text = cleaned_text.strip()
+            
+            # 尝试多种解析策略
+            result_dict = None
+            
+            # 策略1: 直接解析清理后的文本
+            try:
+                result_dict = json.loads(cleaned_text)
+                logger.debug("Successfully parsed JSON response (direct)")
+            except json.JSONDecodeError:
+                pass
+            
+            # 策略2: 提取第一个完整的JSON对象
+            if result_dict is None:
+                json_match = re.search(r'\{(?:[^{}]|(?:\{[^{}]*\}))*\}', cleaned_text, re.DOTALL)
+                if json_match:
                     try:
-                        result_dict = json.loads(result_text)
-                    except:
-                        logger.error("Failed to parse response as JSON, using fallback")
-                        return self._generate_fallback_response()
-            else:
-                # 尝试直接解析整个响应
-                try:
-                    result_dict = json.loads(result_text)
-                except json.JSONDecodeError as e:
-                    logger.error(f"Response is not valid JSON: {e}")
-                    logger.error(f"Response text (first 500 chars): {result_text[:500]}")
-                    return self._generate_fallback_response()
+                        result_dict = json.loads(json_match.group())
+                        logger.debug("Successfully parsed JSON response (regex extraction)")
+                    except json.JSONDecodeError:
+                        pass
+            
+            # 策略3: 查找最大的JSON对象（处理嵌套情况）
+            if result_dict is None:
+                json_matches = re.finditer(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', cleaned_text, re.DOTALL)
+                for match in json_matches:
+                    try:
+                        result_dict = json.loads(match.group())
+                        logger.debug("Successfully parsed JSON response (nested extraction)")
+                        break
+                    except json.JSONDecodeError:
+                        continue
+            
+            # 如果所有策略都失败
+            if result_dict is None:
+                logger.error("Failed to parse response as JSON")
+                logger.error(f"Original response (first 500 chars): {result_text[:500]}")
+                logger.error(f"Cleaned response (first 500 chars): {cleaned_text[:500]}")
+                return self._generate_fallback_response()
             
             return result_dict
             
@@ -2020,10 +2230,10 @@ if __name__ == "__main__":
     asyncio.run(main())
 
 
-# # 单个采样文件评估 - 普通模式
+# 单个采样文件评估 - 普通模式
 # python -m extractor.evaluator \
-#   --input_file /user/zhuxuzhou/a_whole_pipeline/sampler/src/sampled_results/cluster_0_samples.json \
-#   --output evaluation_results_cluster_0.json \
+#   --input_file /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/c_sampled_data/cluster_0_samples.json \
+#   --output /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/d_extracted_sample_data/extra_evaluation.json \
 #   --config config.json \
 #   --test_mode
 

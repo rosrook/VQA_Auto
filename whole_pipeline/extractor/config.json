@@ -1,0 +1,129 @@
+{
+  "description": "数据质量评估系统配置文件",
+  
+  "model_configs": {
+    "weak": {
+      "name": "gemini-2.0-flash",
+      "capability": "weak",
+      "model_type": "api",
+      "api_endpoint": "https://yinli.one/v1",
+      "api_key": "sk-2rAJBXccL6zxlogl0xa2qTkMTDPXqeTZMdXHSV9rGJqDuavg",
+      "max_tokens": 4000,
+      "temperature": 0.1,
+      "description": "轻量级模型,快速评估 - 本地加载方式"
+    },
+    "normal": {
+      "name": "gemini-2.5-flash",
+      "capability": "normal",
+      "model_type": "api",
+      "api_endpoint": "https://yinli.one/v1",
+      "api_key": "sk-2rAJBXccL6zxlogl0xa2qTkMTDPXqeTZMdXHSV9rGJqDuavg",
+      "max_tokens": 8000,
+      "temperature": 0.1,
+      "description": "中等能力模型,平衡性能和成本 - API方式"
+    },
+    "sota": {
+      "name": "gemini-2.5-pro",
+      "capability": "sota",
+      "model_type": "api",
+      "api_endpoint": "https://yinli.one/v1",
+      "api_key": "sk-2rAJBXccL6zxlogl0xa2qTkMTDPXqeTZMdXHSV9rGJqDuavg",
+      "max_tokens": 8000,
+      "temperature": 0.1,
+      "description": "最强模型,提供最详细和准确的评估 - API方式"
+    }
+  },
+  
+  "model_weights": {
+    "description": "各模型在最终决策中的权重,总和应为1.0",
+    "weak": 0.15,
+    "normal": 0.30,
+    "sota": 0.55
+  },
+  
+  "thresholds": {
+    "description": "决策阈值配置",
+    "acceptance_threshold": 7.5,
+    "rejection_threshold": 5.0,
+    "high_confidence_threshold": 0.8,
+    "low_confidence_threshold": 0.4
+  },
+  
+  "evaluation_criteria": {
+    "description": "评估标准和权重",
+    "correctness_weight": 0.4,
+    "training_quality_weight": 0.6,
+    "min_model_agreement": 0.6
+  },
+  
+  "processing": {
+    "batch_size": 10,
+    "use_all_models": true,
+    "parallel_processing": true,
+    "max_concurrent_requests": 5,
+    "retry_on_failure": true,
+    "max_retries": 3
+  },
+  
+  "output": {
+    "save_raw_evaluations": true,
+    "save_aggregated_results": true,
+    "save_summary_report": true,
+    "generate_visualizations": false,
+    "export_formats": ["json", "csv"]
+  },
+  
+  "quality_metrics": {
+    "description": "推荐的数据质量指标类别",
+    "categories": [
+      {
+        "name": "基础质量",
+        "metrics": [
+          "清晰度",
+          "完整性",
+          "准确性"
+        ]
+      },
+      {
+        "name": "多模态一致性",
+        "metrics": [
+          "图文对齐度",
+          "语义一致性",
+          "跨模态相关性"
+        ]
+      },
+      {
+        "name": "训练价值",
+        "metrics": [
+          "信息密度",
+          "样本难度",
+          "多样性贡献",
+          "学习梯度质量"
+        ]
+      },
+      {
+        "name": "鲁棒性",
+        "metrics": [
+          "边界情况覆盖",
+          "抗噪声能力",
+          "泛化潜力"
+        ]
+      }
+    ]
+  },
+  
+  "logging": {
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "file": "evaluation.log",
+    "console": true
+  },
+  
+  "advanced": {
+    "use_ensemble_voting": true,
+    "ensemble_strategy": "weighted_average",
+    "uncertainty_estimation": true,
+    "confidence_calibration": true,
+    "metric_importance_learning": false
+  }
+}

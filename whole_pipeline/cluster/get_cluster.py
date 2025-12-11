@@ -1738,17 +1738,17 @@ if __name__ == "__main__":
     
     # 2. 选择聚类算法
     # 方案A: 自动选择最优簇数的KMeans
-    clustering_algo = AutoMiniBatchKMeans(random_state=42, batch_size=1000)
-    clustering_params = {
-        'n_clusters': None,  # None表示自动选择
-        'min_clusters': 1,
-        'max_clusters': 20,
-        'auto_select': True
-    }
+    # clustering_algo = AutoMiniBatchKMeans(random_state=42, batch_size=1000)
+    # clustering_params = {
+    #     'n_clusters': None,  # None表示自动选择
+    #     'min_clusters': 1,
+    #     'max_clusters': 20,
+    #     'auto_select': True
+    # }
     
     # 方案B: 指定簇数的KMeans
-    # clustering_algo = AutoMiniBatchKMeans(random_state=42, batch_size=1000)
-    # clustering_params = {'n_clusters': 10}
+    clustering_algo = AutoMiniBatchKMeans(random_state=42, batch_size=1000)
+    clustering_params = {'n_clusters': 1}
     
     # # 方案C: 层次聚类（自动选择最优簇数）
     # clustering_algo = HierarchicalClustering(linkage='ward')
@@ -1789,8 +1789,8 @@ if __name__ == "__main__":
     
     # 4. 执行聚类
     pipeline.run(
-        input_jsonl="/user/zhuxuzhou/a_cluster_test/converted_clean_content_standardized_final.jsonl",  #  "/user/zhuxuzhou/a_cluster_test/converted_clean_content.jsonl",
-        output_path="/user/zhuxuzhou/a_whole_pipeline/cluster/vqa_clustered_results_final.json"
+        input_jsonl="/home/zhuxuzhou/VQA_Auto/whole_pipeline/data/a_converted_data/new_converted.jsonl",  #  "/user/zhuxuzhou/a_cluster_test/converted_clean_content.jsonl",
+        output_path="/home/zhuxuzhou/VQA_Auto/whole_pipeline/data/b_clustered_data/vqa_clustered_results_final.json"
     )
     
     print("\n✨ 全部完成!")

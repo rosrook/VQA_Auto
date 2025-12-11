@@ -314,8 +314,8 @@ if __name__ == "__main__":
 
 
 # python sample.py \
-#   --input /user/zhuxuzhou/a_cluster_test/vqa_clustered_results_image_only.json \
-#   --output_dir sampled_results \
+#   --input /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/b_clustered_data/vqa_clustered_results_final.json \
+#   --output_dir /home/zhuxuzhou/VQA_Auto/whole_pipeline/data/c_sampled_data \
 #   --sample_size 3 \
 #   --strategy random \
 #   --seed 42 \
