@@ -1,0 +1,116 @@
+{
+  "description": "SOTA agents by task specialty. Each agent entry provides role, specialty tasks, suggested models, and a concise prompt scaffold.",
+  "agents": [
+    {
+      "name": "reasoning_agent",
+      "specialty": ["complex reasoning", "data quality decisions", "policy enforcement"],
+      "suggested_models": [
+        "Qwen2.5-72B-Instruct",
+        "GPT-4.1",
+        "DeepSeek-R1"
+      ],
+      "prompt_scaffold": "Use aggregated metrics and hard cases to propose accept/reject/review rules. Output JSON with decision rationale and key metrics referenced."
+    },
+    {
+      "name": "alignment_agent",
+      "specialty": ["multimodal alignment", "semantic/entity alignment", "image-text consistency"],
+      "suggested_models": [
+        "Qwen2-VL-72B",
+        "Gemini-1.5-Pro",
+        "Claude-3.5-Sonnet"
+      ],
+      "prompt_scaffold": "Check visual-text alignment risks. List alignment checks and scenarios requiring manual review. Return structured checklist."
+    },
+    {
+      "name": "robustness_agent",
+      "specialty": ["edge cases", "noise/outlier detection", "risk patterns"],
+      "suggested_models": [
+        "Claude-3.5-Sonnet",
+        "GPT-4.1",
+        "DeepSeek-V3"
+      ],
+      "prompt_scaffold": "From hard cases, summarize risk patterns and propose defensive filters or review triggers. Output risk pattern + recommended checks."
+    },
+    {
+      "name": "quality_filter_agent",
+      "specialty": ["rule synthesis", "metric-to-rule translation", "lightweight filtering"],
+      "suggested_models": [
+        "Gemini-1.5-Pro",
+        "Qwen2.5-32B",
+        "GPT-4.1"
+      ],
+      "prompt_scaffold": "Convert high-frequency general metrics (with specific examples) into concise filtering rules. Keep rules short and directly actionable."
+    },
+    {
+      "name": "prompt_designer",
+      "specialty": ["prompt engineering", "instruction design"],
+      "suggested_models": [
+        "Qwen2.5-32B",
+        "GPT-4.1",
+        "Claude-3.5-Haiku"
+      ],
+      "prompt_scaffold": "Produce ≤8-line prompts for each agent with input placeholders and expected JSON output schema."
+    },
+    {
+      "name": "consistency_auditor",
+      "specialty": ["model disagreement analysis", "score variance review"],
+      "suggested_models": [
+        "DeepSeek-R1",
+        "Qwen2.5-72B-Instruct",
+        "GPT-4.1"
+      ],
+      "prompt_scaffold": "Given high-variance samples, recommend re-check criteria and weighted strategies. Output review checklist."
+    },
+    {
+      "name": "code_agent",
+      "specialty": ["code generation", "static analysis", "bug localization"],
+      "suggested_models": [
+        "Qwen2.5-Coder-32B",
+        "GPT-4.1-Code",
+        "DeepSeek-Coder-V2"
+      ],
+      "prompt_scaffold": "Given code-related metrics or issues, propose fixes or verification steps. Return patch suggestions and test ideas."
+    },
+    {
+      "name": "ocr_agent",
+      "specialty": ["OCR", "document understanding", "layout-aware extraction"],
+      "suggested_models": [
+        "Qwen2-VL-72B",
+        "Gemini-1.5-Pro",
+        "PaddleOCR-PP-Structure (tool-in-the-loop)"
+      ],
+      "prompt_scaffold": "Extract and verify text/layout consistency. Flag ambiguity and low-confidence regions. Output structured fields + confidence."
+    },
+    {
+      "name": "geometry_agent",
+      "specialty": ["geometry word problems", "diagram reasoning", "spatial logic"],
+      "suggested_models": [
+        "Gemini-1.5-Pro",
+        "GPT-4.1",
+        "Qwen2.5-72B-Instruct"
+      ],
+      "prompt_scaffold": "Solve or validate geometry/spatial tasks; ensure consistency of spatial relations. Provide step-by-step reasoning summary."
+    },
+    {
+      "name": "math_agent",
+      "specialty": ["math word problems", "quantitative reasoning"],
+      "suggested_models": [
+        "DeepSeek-Math",
+        "GPT-4.1",
+        "Qwen2.5-72B-Instruct"
+      ],
+      "prompt_scaffold": "Perform step-by-step math reasoning; verify numeric answers; return final answer + justification."
+    },
+    {
+      "name": "safety_bias_agent",
+      "specialty": ["safety", "bias", "content risk"],
+      "suggested_models": [
+        "Claude-3.5-Sonnet",
+        "GPT-4.1",
+        "Qwen2.5-72B-Instruct"
+      ],
+      "prompt_scaffold": "Screen for safety/bias issues in samples; list risk categories and recommend mitigation or removal criteria."
+    }
+  ]
+}
+

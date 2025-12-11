@@ -1,43 +1,52 @@
-You are a decision model. You will receive aggregated data quality metrics and hard cases from sampled data.
-Your tasks:
-1) Propose a set of agents (name + 1-2 line purpose).
-2) For each agent, craft a concise prompt that leverages the metrics and hard-case patterns.
-3) Summarize the key screening standards implied by the metrics (focus on general + top specifics).
-4) Highlight risk patterns from hard cases and how agents should handle them.
+You are a decision model. Based on the aggregated data quality metrics and hard cases, select appropriate agents and generate prompts for them.
+
+Your task:
+Select relevant agents from the suggested list and generate one or more prompts for each selected agent.
+Each agent can have multiple prompts if needed (e.g., different scenarios or tasks).
 
 Aggregated metrics (cross-sample, deduplicated, top items):
 1. Object Recognition Accuracy -> Whether the answer correctly identifies and describes the objects present in the images (e.g., stuffed animals, food items, airplane interior).
 2. Contextual Understanding -> Whether the answer accurately interprets the context of the scene and the relationships between the objects (e.g., stuffed animals as travel companions, dining on an airplane).
-3. Activity Inference -> Whether the answer correctly infers the activities taking place based on the visual cues in the images (e.g., dining, entertainment).
-4. Multi-image contextual synthesis -> Whether the answer effectively combines details and inferences from all provided images to form a cohesive and comprehensive description of the overall scenario.
+3. Inference of activities and relationships -> Whether the answer correctly infers the activities taking place based on the visual cues in the images (e.g., dining, entertainment).; Whether the answer correctly infers activities (e.g., dining, in-flight entertainment) and the relationships between subjects (e.g., travel companions) based on the visual context.; Whether the answer accurately infers activities by connecting objects, people, and context depicted across the images.
+4. Multi-image contextual synthesis -> Whether the answer effectively combines details and inferences from all provided images to form a cohesive and comprehensive description of the overall scenario.; Whether the answer correctly integrates details from all provided images to form a coherent description of the overall event.
 5. Detailed object and attribute identification -> Whether the answer accurately identifies specific objects (e.g., types of stuffed animals) and their distinguishing attributes (e.g., chef's hat, flower accessory) within the images.
-6. Inference of activities and relationships -> Whether the answer correctly infers activities (e.g., dining, in-flight entertainment) and the relationships between subjects (e.g., travel companions) based on the visual context.
-7. Multi-image narrative synthesis -> Whether the answer correctly integrates details from all provided images to form a coherent description of the overall event.
-8. Visual-based activity inference -> Whether the answer accurately infers activities by connecting objects, people, and context depicted across the images.
-9. Structured and comprehensive response -> Whether the answer is organized logically (e.g., using headings/lists) and provides a detailed breakdown of the scene and activities.
-10. Accuracy of cross-modal entity verification -> Whether the answer correctly verifies the presence or absence of specific entities (characters) across both provided images.
-11. Completeness in multimodal set operations -> Whether the answer includes all items that satisfy the logical condition (intersection of characters) described in the question.
-12. Factual accuracy in multi-entity identification -> Whether the list of entities provided in the answer is factually correct and free from hallucinations or omissions.
+6. Structured and comprehensive response -> Whether the answer is organized logically (e.g., using headings/lists) and provides a detailed breakdown of the scene and activities.
+7. Accuracy of cross-modal entity verification -> Whether the answer correctly verifies the presence or absence of specific entities (characters) across both provided images.
+8. Completeness in multimodal set operations -> Whether the answer includes all items that satisfy the logical condition (intersection of characters) described in the question.
+9. Factual accuracy in multi-entity identification -> Whether the list of entities provided in the answer is factually correct and free from hallucinations or omissions.
+10. Cross-image information synthesis accuracy -> Whether the answer correctly identifies and consistently describes the same objects across multiple images, avoiding contradictions in location or description.
+11. Fine-grained visual feature interpretation -> Whether the answer accurately interprets subtle but defining visual features of an object rather than mischaracterizing them (e.g., mistaking facial markings for glasses).
+12. Factual grounding and hallucination avoidance -> Whether all claims about the presence and location of objects in the answer are directly verifiable from the visual evidence in the images.
 
 Representative hard cases (up to 3):
 - sample 17: difficulty=4.11, confidence=0.53; scores[weak: c=9.0, t=8.5; normal: c=7.5, t=9.0; sota: c=2.0, t=2.5]
 
 Suggested agent types (you may adjust/improve):
-- data_filter_agent: 给出基于指标的保留/剔除建议，关注高频/general指标
-- edge_case_agent: 结合难例，总结风险模式与需要人工复核的情形
-- consistency_agent: 检查模型分歧点，对分歧大的样本给出额外检查标准
-- prompt_designer: 为上述agents生成精炼的执行prompt
+- reasoning_agent: specialty=[complex reasoning, data quality decisions, policy enforcement], suggested_models=[Qwen2.5-72B-Instruct, GPT-4.1, DeepSeek-R1]
+- alignment_agent: specialty=[multimodal alignment, semantic/entity alignment, image-text consistency], suggested_models=[Qwen2-VL-72B, Gemini-1.5-Pro, Claude-3.5-Sonnet]
+- robustness_agent: specialty=[edge cases, noise/outlier detection, risk patterns], suggested_models=[Claude-3.5-Sonnet, GPT-4.1, DeepSeek-V3]
+- quality_filter_agent: specialty=[rule synthesis, metric-to-rule translation, lightweight filtering], suggested_models=[Gemini-1.5-Pro, Qwen2.5-32B, GPT-4.1]
+- prompt_designer: specialty=[prompt engineering, instruction design], suggested_models=[Qwen2.5-32B, GPT-4.1, Claude-3.5-Haiku]
+- consistency_auditor: specialty=[model disagreement analysis, score variance review], suggested_models=[DeepSeek-R1, Qwen2.5-72B-Instruct, GPT-4.1]
+- code_agent: specialty=[code generation, static analysis, bug localization], suggested_models=[Qwen2.5-Coder-32B, GPT-4.1-Code, DeepSeek-Coder-V2]
+- ocr_agent: specialty=[OCR, document understanding, layout-aware extraction], suggested_models=[Qwen2-VL-72B, Gemini-1.5-Pro, PaddleOCR-PP-Structure (tool-in-the-loop)]
+- geometry_agent: specialty=[geometry word problems, diagram reasoning, spatial logic], suggested_models=[Gemini-1.5-Pro, GPT-4.1, Qwen2.5-72B-Instruct]
+- math_agent: specialty=[math word problems, quantitative reasoning], suggested_models=[DeepSeek-Math, GPT-4.1, Qwen2.5-72B-Instruct]
+- safety_bias_agent: specialty=[safety, bias, content risk], suggested_models=[Claude-3.5-Sonnet, GPT-4.1, Qwen2.5-72B-Instruct]
 
-Output format suggestion (you may enrich):
+Output format (simplified):
 {
   "agents": [
-    {"name": "...", "purpose": "...", "prompt": "..."},
+    {
+      "name": "agent_name",
+      "prompts": [
+        "prompt 1 for this agent",
+        "prompt 2 for this agent (if multiple prompts needed)",
+        ...
+      ]
+    },
     ...
-  ],
-  "screening_standards": [
-    {"general": "...", "specific_examples": ["...", "..."]}
-  ],
-  "hard_case_guidance": [
-    {"pattern": "...", "recommended_checks": ["..."], "who_handles": "<agent_name>"}
   ]
 }
+
+Note: Only include agents that are relevant based on the metrics and hard cases. Each agent can have one or more prompts.

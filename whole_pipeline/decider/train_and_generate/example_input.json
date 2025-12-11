@@ -1,0 +1,36 @@
+[
+    {
+        "report": "Dataset contains 10000 samples with high duplication rate (35%). Quality issues: 15% samples have incomplete information. Average text length: 250 tokens.",
+        "agent_list": ["quality_filter_agent", "deduplication_filter", "length_filter"],
+        "filtered_datasets": [
+            {
+                "data_ids": [0, 1, 5, 7, 9, 12, 15, 18, 20],
+                "metadata": {
+                    "filter_reason": "High quality samples",
+                    "timestamp": "2025-01-01"
+                }
+            },
+            {
+                "data_ids": [2, 3, 8, 11, 14, 17, 19],
+                "metadata": {
+                    "filter_reason": "Medium quality samples",
+                    "timestamp": "2025-01-02"
+                }
+            }
+        ]
+    },
+    {
+        "report": "Dataset contains 5000 samples with low quality images (20%). Text quality is good. Average image resolution: 512x512.",
+        "agent_list": ["quality_filter_agent", "deduplication_filter", "length_filter"],
+        "filtered_datasets": [
+            {
+                "data_ids": [100, 101, 105, 107, 109, 112],
+                "metadata": {
+                    "filter_reason": "High quality samples with good images",
+                    "timestamp": "2025-01-03"
+                }
+            }
+        ]
+    }
+]
+

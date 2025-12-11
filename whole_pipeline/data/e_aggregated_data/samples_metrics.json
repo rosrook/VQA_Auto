@@ -15,33 +15,23 @@
         ]
       },
       {
-        "general": "Activity Inference",
+        "general": "Inference of activities and relationships",
         "specific": [
-          "Whether the answer correctly infers the activities taking place based on the visual cues in the images (e.g., dining, entertainment)."
+          "Whether the answer correctly infers the activities taking place based on the visual cues in the images (e.g., dining, entertainment).",
+          "Whether the answer correctly infers activities (e.g., dining, in-flight entertainment) and the relationships between subjects (e.g., travel companions) based on the visual context."
         ]
       },
       {
         "general": "Multi-image contextual synthesis",
         "specific": [
-          "Whether the answer effectively combines details and inferences from all provided images to form a cohesive and comprehensive description of the overall scenario."
+          "Whether the answer effectively combines details and inferences from all provided images to form a cohesive and comprehensive description of the overall scenario.",
+          "Whether the answer correctly integrates details from all provided images to form a coherent description of the overall event."
         ]
       },
       {
         "general": "Detailed object and attribute identification",
         "specific": [
           "Whether the answer accurately identifies specific objects (e.g., types of stuffed animals) and their distinguishing attributes (e.g., chef's hat, flower accessory) within the images."
-        ]
-      },
-      {
-        "general": "Inference of activities and relationships",
-        "specific": [
-          "Whether the answer correctly infers activities (e.g., dining, in-flight entertainment) and the relationships between subjects (e.g., travel companions) based on the visual context."
-        ]
-      },
-      {
-        "general": "Multi-image narrative synthesis",
-        "specific": [
-          "Whether the answer correctly integrates details from all provided images to form a coherent description of the overall event."
         ]
       },
       {

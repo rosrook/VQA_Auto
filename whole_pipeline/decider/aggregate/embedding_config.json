@@ -1,0 +1,8 @@
+{
+    "api_type": "openai",
+    "api_key": "sk-2rAJBXccL6zxlogl0xa2qTkMTDPXqeTZMdXHSV9rGJqDuavg",
+    "base_url": "https://yinli.one/v1",
+    "model": "text-embedding-3-small",
+    "timeout": 30,
+    "max_retries": 2
+  }

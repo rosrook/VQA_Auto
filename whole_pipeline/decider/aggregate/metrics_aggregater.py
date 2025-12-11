@@ -42,11 +42,8 @@ except ImportError:
     SKLEARN_AVAILABLE = False
     logger.warning("sklearn not available, using simple text similarity")
 
-try:
-    from sentence_transformers import SentenceTransformer
-    SENTENCE_TRANSFORMERS_AVAILABLE = True
-except ImportError:
-    SENTENCE_TRANSFORMERS_AVAILABLE = False
+import requests
+import time
 
 
 # --------------------------------------------------------------------------- #
@@ -70,6 +67,156 @@ class MetricItem:
         return f"{self.general_metric_description} {self.specific_metric_description}"
 
 
+# --------------------------------------------------------------------------- #
+# Embedding API 客户端
+# --------------------------------------------------------------------------- #
+class EmbeddingAPIClient:
+    """
+    Embedding API 客户端,支持多种 embedding API 服务
+    - OpenAI API
+    - HuggingFace Inference API
+    - 自定义兼容 OpenAI 格式的 API
+    """
+    
+    def __init__(
+        self,
+        api_type: str = "openai",  # "openai", "hf", "custom"
+        api_key: Optional[str] = None,
+        base_url: Optional[str] = None,
+        model: Optional[str] = None,
+        timeout: int = 30,
+        max_retries: int = 2
+    ):
+        """
+        初始化 Embedding API 客户端
+        
+        参数:
+            api_type: API 类型 ("openai", "hf", "custom")
+            api_key: API 密钥
+            base_url: API 基础 URL (OpenAI: https://api.openai.com/v1, HF: https://api-inference.huggingface.co)
+            model: 模型名称 (OpenAI: "text-embedding-3-small", HF: "sentence-transformers/all-MiniLM-L6-v2")
+            timeout: 请求超时时间(秒)
+            max_retries: 最大重试次数
+        """
+        self.api_type = api_type
+        self.api_key = api_key
+        self.base_url = base_url or self._get_default_url(api_type)
+        self.model = model or self._get_default_model(api_type)
+        self.timeout = timeout
+        self.max_retries = max_retries
+        
+        logger.info(f"初始化 Embedding API 客户端: type={api_type}, model={self.model}")
+    
+    def _get_default_url(self, api_type: str) -> str:
+        """获取默认 API URL"""
+        defaults = {
+            "openai": "https://api.openai.com/v1",
+            "hf": "https://api-inference.huggingface.co",
+            "custom": "https://api.openai.com/v1"  # 假设兼容 OpenAI 格式
+        }
+        return defaults.get(api_type, defaults["openai"])
+    
+    def _get_default_model(self, api_type: str) -> str:
+        """获取默认模型名称"""
+        defaults = {
+            "openai": "text-embedding-3-small",
+            "hf": "sentence-transformers/all-MiniLM-L6-v2",
+            "custom": "text-embedding-3-small"
+        }
+        return defaults.get(api_type, defaults["openai"])
+    
+    def encode(self, texts: List[str]) -> np.ndarray:
+        """
+        获取文本的 embedding 向量
+        
+        参数:
+            texts: 文本列表
+            
+        返回:
+            numpy.ndarray: embedding 向量数组, shape (len(texts), embedding_dim)
+        """
+        if not texts:
+            return np.array([])
+        
+        if self.api_type == "openai":
+            return self._encode_openai(texts)
+        elif self.api_type == "hf":
+            return self._encode_hf(texts)
+        else:  # custom, 假设兼容 OpenAI 格式
+            return self._encode_openai(texts)
+    
+    def _encode_openai(self, texts: List[str]) -> np.ndarray:
+        """
+        使用 OpenAI API 获取 embedding (批量调用)
+        OpenAI API 支持一次传入多个文本，大幅提升性能
+        """
+        url = f"{self.base_url}/embeddings"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        # OpenAI API 支持批量输入，一次最多处理 2048 个文本
+        # 批量处理可以大幅减少 API 调用次数
+        batch_size = 100  # 每批处理100个文本，避免单次请求过大
+        all_embeddings = []
+        
+        for i in range(0, len(texts), batch_size):
+            batch_texts = texts[i:i + batch_size]
+            payload = {
+                "input": batch_texts,  # 批量输入
+                "model": self.model
+            }
+            
+            for attempt in range(self.max_retries + 1):
+                try:
+                    response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+                    response.raise_for_status()
+                    data = response.json()
+                    # 批量返回的格式: {"data": [{"embedding": [...]}, ...], ...}
+                    batch_embeddings = [item["embedding"] for item in data["data"]]
+                    all_embeddings.extend(batch_embeddings)
+                    break
+                except requests.exceptions.RequestException as e:
+                    if attempt < self.max_retries:
+                        wait_time = 2 ** attempt
+                        logger.warning(f"Embedding API 批量请求失败 (尝试 {attempt + 1}/{self.max_retries + 1}): {e}, {wait_time}秒后重试")
+                        time.sleep(wait_time)
+                    else:
+                        logger.error(f"Embedding API 批量请求最终失败: {e}")
+                        raise
+        
+        return np.array(all_embeddings)
+    
+    def _encode_hf(self, texts: List[str]) -> np.ndarray:
+        """使用 HuggingFace Inference API 获取 embedding"""
+        url = f"{self.base_url}/pipeline/feature-extraction/{self.model}"
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
+        
+        payload = {
+            "inputs": texts,
+            "options": {"wait_for_model": True}
+        }
+        
+        for attempt in range(self.max_retries + 1):
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=self.timeout)
+                response.raise_for_status()
+                embeddings_list = response.json()
+                return np.array(embeddings_list)
+            except requests.exceptions.RequestException as e:
+                if attempt < self.max_retries:
+                    wait_time = 2 ** attempt
+                    logger.warning(f"HF Embedding API 请求失败 (尝试 {attempt + 1}/{self.max_retries + 1}): {e}, {wait_time}秒后重试")
+                    time.sleep(wait_time)
+                else:
+                    logger.error(f"HF Embedding API 请求最终失败: {e}")
+                    raise
+
+
 class MetricsAggregator:
     """
     指标聚合器: 对指标列表进行语义去重/聚合
@@ -82,7 +229,7 @@ class MetricsAggregator:
         similarity_threshold: float = 0.75,
         general_similarity_threshold: float = 0.80,
         use_embedding: bool = True,
-        embedding_model: Optional[str] = None
+        embedding_api_config: Optional[Dict] = None
     ):
         """
         初始化聚合器
@@ -91,36 +238,68 @@ class MetricsAggregator:
             similarity_threshold: 综合相似度阈值,超过此值则认为是相似指标 (0-1)
             general_similarity_threshold: General metric 相似度阈值,如果 General 相似度超过此值,
                                        即使 Specific 不同也会合并到同一个 general 下 (0-1)
-            use_embedding: 是否使用 embedding 模型计算相似度
-            embedding_model: embedding 模型名称 (如果使用 sentence-transformers)
+            use_embedding: 是否使用 embedding API 计算相似度
+            embedding_api_config: Embedding API 配置字典,格式:
+                {
+                    "api_type": "openai" | "hf" | "custom",
+                    "api_key": "...",
+                    "base_url": "...",  # 可选
+                    "model": "...",     # 可选
+                    "timeout": 30,      # 可选
+                    "max_retries": 2    # 可选
+                }
+                如果为 None 且 use_embedding=True, 将尝试从环境变量读取
         """
         self.similarity_threshold = similarity_threshold
         self.general_similarity_threshold = general_similarity_threshold
         self.use_embedding = use_embedding
         
-        # 初始化 embedding 模型
-        self.embedding_model = None
-        if use_embedding and SENTENCE_TRANSFORMERS_AVAILABLE:
-            model_name = embedding_model or 'paraphrase-MiniLM-L6-v2'
+        # 初始化 embedding 缓存（无论是否使用 embedding 都初始化，避免属性错误）
+        self._embedding_cache: Dict[str, np.ndarray] = {}
+        
+        # 初始化 embedding API 客户端
+        self.embedding_client = None
+        if use_embedding:
             try:
-                self.embedding_model = SentenceTransformer(model_name)
-                logger.info(f"加载 embedding 模型: {model_name}")
+                if embedding_api_config:
+                    self.embedding_client = EmbeddingAPIClient(**embedding_api_config)
+                else:
+                    # 尝试从环境变量读取配置
+                    import os
+                    api_key = os.getenv("EMBEDDING_API_KEY")
+                    api_type = os.getenv("EMBEDDING_API_TYPE", "openai")
+                    base_url = os.getenv("EMBEDDING_BASE_URL")
+                    model = os.getenv("EMBEDDING_MODEL")
+                    
+                    if api_key:
+                        self.embedding_client = EmbeddingAPIClient(
+                            api_type=api_type,
+                            api_key=api_key,
+                            base_url=base_url,
+                            model=model
+                        )
+                    else:
+                        logger.warning("未提供 embedding API 配置且环境变量未设置, 使用 TF-IDF")
+                        self.use_embedding = False
             except Exception as e:
-                logger.warning(f"无法加载 embedding 模型: {e}, 使用 TF-IDF")
+                logger.warning(f"无法初始化 embedding API 客户端: {e}, 使用 TF-IDF")
                 self.use_embedding = False
         
-        # 初始化 TF-IDF vectorizer (作为备选)
-        if not self.use_embedding and SKLEARN_AVAILABLE:
+        # 初始化 TF-IDF vectorizer (作为备选，始终初始化避免属性错误)
+        self.tfidf_vectorizer = None
+        if SKLEARN_AVAILABLE:
             self.tfidf_vectorizer = TfidfVectorizer(
                 max_features=1000,
                 ngram_range=(1, 2),
                 stop_words='english'
             )
-            logger.info("使用 TF-IDF 进行相似度计算")
+            if not self.use_embedding:
+                logger.info("使用 TF-IDF 进行相似度计算")
         
         logger.info(
             f"初始化指标聚合器,综合相似度阈值: {similarity_threshold}, "
-            f"General相似度阈值: {general_similarity_threshold}"
+            f"General相似度阈值: {general_similarity_threshold}, "
+            f"使用Embedding API: {self.use_embedding}"
         )
     
     def _calculate_text_similarity(
@@ -141,21 +320,44 @@ class MetricsAggregator:
         if not text1 or not text2:
             return 0.0
         
-        # 使用 embedding 模型
-        if self.use_embedding and self.embedding_model:
-            print("using embedding!!!")
+        # 使用 embedding API (带缓存)
+        if self.use_embedding and self.embedding_client:
             try:
-                embeddings = self.embedding_model.encode([text1, text2])
+                # 检查缓存
+                vec1 = self._embedding_cache.get(text1)
+                vec2 = self._embedding_cache.get(text2)
+                
+                # 批量获取缺失的 embedding
+                texts_to_encode = []
+                if vec1 is None:
+                    texts_to_encode.append(text1)
+                if vec2 is None:
+                    texts_to_encode.append(text2)
+                
+                if texts_to_encode:
+                    new_embeddings = self.embedding_client.encode(texts_to_encode)
+                    # 更新缓存并赋值
+                    idx = 0
+                    if vec1 is None:
+                        vec1 = new_embeddings[idx]
+                        self._embedding_cache[text1] = vec1
+                        idx += 1
+                    if vec2 is None:
+                        vec2 = new_embeddings[idx]
+                        self._embedding_cache[text2] = vec2
+                else:
+                    # 都从缓存获取
+                    vec1 = self._embedding_cache[text1]
+                    vec2 = self._embedding_cache[text2]
+                
                 # 计算余弦相似度
                 if SKLEARN_AVAILABLE:
                     similarity = cosine_similarity(
-                        embeddings[0:1],
-                        embeddings[1:2]
+                        vec1.reshape(1, -1),
+                        vec2.reshape(1, -1)
                     )[0][0]
                 else:
                     # 使用 numpy 计算余弦相似度
-                    vec1 = embeddings[0]
-                    vec2 = embeddings[1]
                     dot_product = np.dot(vec1, vec2)
                     norm1 = np.linalg.norm(vec1)
                     norm2 = np.linalg.norm(vec2)
@@ -165,10 +367,10 @@ class MetricsAggregator:
                         similarity = dot_product / (norm1 * norm2)
                 return float(similarity)
             except Exception as e:
-                logger.warning(f"Embedding 计算失败: {e}, 回退到简单方法")
+                logger.warning(f"Embedding API 计算失败: {e}, 回退到简单方法")
         
         # 使用 TF-IDF
-        if SKLEARN_AVAILABLE:
+        if SKLEARN_AVAILABLE and self.tfidf_vectorizer is not None:
             try:
                 vectors = self.tfidf_vectorizer.fit_transform([text1, text2])
                 similarity = cosine_similarity(vectors[0:1], vectors[1:2])[0][0]
@@ -463,7 +665,7 @@ class MultiModelMetricsProcessor:
         similarity_threshold: float = 0.75,
         general_similarity_threshold: float = 0.80,
         use_embedding: bool = True,
-        embedding_model: Optional[str] = None
+        embedding_api_config: Optional[Dict] = None
     ):
         """
         初始化处理器
@@ -473,8 +675,8 @@ class MultiModelMetricsProcessor:
             score_diff_threshold: 打分差异阈值,与SOTA差异超过此值则抛弃该模型的metrics
             similarity_threshold: 指标相似度阈值（用于去重）
             general_similarity_threshold: General指标相似度阈值（用于去重）
-            use_embedding: 是否使用embedding模型
-            embedding_model: embedding模型名称
+            use_embedding: 是否使用embedding API计算相似度
+            embedding_api_config: Embedding API 配置字典,格式见 MetricsAggregator.__init__
         """
         self.difficulty_threshold = difficulty_threshold
         self.score_diff_threshold = score_diff_threshold
@@ -484,7 +686,7 @@ class MultiModelMetricsProcessor:
             similarity_threshold=similarity_threshold,
             general_similarity_threshold=general_similarity_threshold,
             use_embedding=use_embedding,
-            embedding_model=embedding_model
+            embedding_api_config=embedding_api_config
         )
         
         logger.info(
@@ -932,11 +1134,25 @@ class MultiModelMetricsProcessor:
                     })
 
         # 使用更宽松阈值的聚合器
+        # 复用已有的 embedding 配置（如果有）
+        embedding_config = None
+        if self.metrics_aggregator.use_embedding and self.metrics_aggregator.embedding_client:
+            # 从现有客户端提取配置以便复用
+            client = self.metrics_aggregator.embedding_client
+            embedding_config = {
+                "api_type": client.api_type,
+                "api_key": client.api_key,
+                "base_url": client.base_url,
+                "model": client.model,
+                "timeout": client.timeout,
+                "max_retries": client.max_retries,
+            }
+        
         loose_aggregator = MetricsAggregator(
             similarity_threshold=similarity_threshold,
             general_similarity_threshold=general_similarity_threshold,
             use_embedding=self.metrics_aggregator.use_embedding,
-            embedding_model=None  # 复用已有模型配置或默认
+            embedding_api_config=embedding_config  # 复用配置（或从环境变量读取）
         )
         aggregated = loose_aggregator.deduplicate_metrics(collected)
 
@@ -947,13 +1163,23 @@ class MultiModelMetricsProcessor:
         aggregated_metrics: List[Dict[str, List[str]]],
         hard_cases: List[Dict],
         top_metrics: int = 12,
-        top_hard_cases: int = 3
+        top_hard_cases: int = 3,
+        agents_catalog_path: Optional[str] = None,
+        simple_format: bool = False
     ) -> str:
         """
         生成传给决策模型的prompt:
         - 汇总后的全局metrics(不区分sample)
         - 代表性难例简述
         - 期望决策模型输出: agent列表 + 每个agent的建议prompt
+        
+        参数:
+            aggregated_metrics: 聚合后的指标列表
+            hard_cases: 难例列表
+            top_metrics: 最多显示的指标数量
+            top_hard_cases: 最多显示的难例数量
+            agents_catalog_path: agents_catalog.json 文件路径,如果提供则从中读取agents列表
+            simple_format: 是否使用简易版格式,简易版只要求返回agents和prompts(一对多)
         """
         # 准备metrics文本
         metrics_lines = []
@@ -981,33 +1207,96 @@ class MultiModelMetricsProcessor:
                 f"- sample {sid}: difficulty={diff:.2f}, confidence={conf:.2f}; scores[{scores_str}]"
             )
 
-        agent_requirements = [
-            "data_filter_agent: 给出基于指标的保留/剔除建议，关注高频/general指标",
-            "edge_case_agent: 结合难例，总结风险模式与需要人工复核的情形",
-            "consistency_agent: 检查模型分歧点，对分歧大的样本给出额外检查标准",
-            "prompt_designer: 为上述agents生成精炼的执行prompt"
-        ]
+        # 加载 agents 列表: 优先从文件读取,否则使用默认
+        agent_requirements = []
+        if agents_catalog_path:
+            try:
+                catalog_path = Path(agents_catalog_path)
+                if catalog_path.is_file():
+                    with catalog_path.open("r", encoding="utf-8") as f:
+                        catalog = json.load(f)
+                    agents = catalog.get("agents", [])
+                    for agent in agents:
+                        name = agent.get("name", "unknown")
+                        specialty = agent.get("specialty", [])
+                        specialty_str = ", ".join(specialty) if isinstance(specialty, list) else str(specialty)
+                        models = agent.get("suggested_models", [])
+                        models_str = ", ".join(models[:3]) if models else "N/A"
+                        agent_requirements.append(
+                            f"{name}: specialty=[{specialty_str}], suggested_models=[{models_str}]"
+                        )
+                    logger.info(f"从 {agents_catalog_path} 加载了 {len(agent_requirements)} 个 agents")
+                else:
+                    logger.warning(f"agents_catalog 文件不存在: {agents_catalog_path}, 使用默认列表")
+            except Exception as e:
+                logger.warning(f"读取 agents_catalog 失败: {e}, 使用默认列表")
+        
+        # 如果没有从文件加载到agents,使用默认列表
+        if not agent_requirements:
+            agent_requirements = [
+                "data_filter_agent: 给出基于指标的保留/剔除建议，关注高频/general指标",
+                "edge_case_agent: 结合难例，总结风险模式与需要人工复核的情形",
+                "consistency_agent: 检查模型分歧点，对分歧大的样本给出额外检查标准",
+                "prompt_designer: 为上述agents生成精炼的执行prompt"
+            ]
 
         prompt = []
-        prompt.append("You are a decision model. You will receive aggregated data quality metrics and hard cases from sampled data.")
-        prompt.append("Your tasks:")
-        prompt.append("1) Propose a set of agents (name + 1-2 line purpose).")
-        prompt.append("2) For each agent, craft a concise prompt that leverages the metrics and hard-case patterns.")
-        prompt.append("3) Summarize the key screening standards implied by the metrics (focus on general + top specifics).")
-        prompt.append("4) Highlight risk patterns from hard cases and how agents should handle them.")
-        prompt.append("")
-        prompt.append("Aggregated metrics (cross-sample, deduplicated, top items):")
-        prompt.extend(metrics_lines if metrics_lines else ["(no metrics found)"])
-        prompt.append("")
-        prompt.append(f"Representative hard cases (up to {top_hard_cases}):")
-        prompt.extend(hard_lines if hard_lines else ["(no hard cases)"])
-        prompt.append("")
-        prompt.append("Suggested agent types (you may adjust/improve):")
-        for a in agent_requirements:
-            prompt.append(f"- {a}")
-        prompt.append("")
-        prompt.append("Output format suggestion (you may enrich):")
-        prompt.append("""{
+        
+        if simple_format:
+            # 简易版: 只要求返回 agents 和 prompts
+            prompt.append("You are a decision model. Based on the aggregated data quality metrics and hard cases, select appropriate agents and generate prompts for them.")
+            prompt.append("")
+            prompt.append("Your task:")
+            prompt.append("Select relevant agents from the suggested list and generate one or more prompts for each selected agent.")
+            prompt.append("Each agent can have multiple prompts if needed (e.g., different scenarios or tasks).")
+            prompt.append("")
+            prompt.append("Aggregated metrics (cross-sample, deduplicated, top items):")
+            prompt.extend(metrics_lines if metrics_lines else ["(no metrics found)"])
+            prompt.append("")
+            prompt.append(f"Representative hard cases (up to {top_hard_cases}):")
+            prompt.extend(hard_lines if hard_lines else ["(no hard cases)"])
+            prompt.append("")
+            prompt.append("Suggested agent types (you may adjust/improve):")
+            for a in agent_requirements:
+                prompt.append(f"- {a}")
+            prompt.append("")
+            prompt.append("Output format (simplified):")
+            prompt.append("""{
+  "agents": [
+    {
+      "name": "agent_name",
+      "prompts": [
+        "prompt 1 for this agent",
+        "prompt 2 for this agent (if multiple prompts needed)",
+        ...
+      ]
+    },
+    ...
+  ]
+}""")
+            prompt.append("")
+            prompt.append("Note: Only include agents that are relevant based on the metrics and hard cases. Each agent can have one or more prompts.")
+        else:
+            # 完整版: 包含所有信息
+            prompt.append("You are a decision model. You will receive aggregated data quality metrics and hard cases from sampled data.")
+            prompt.append("Your tasks:")
+            prompt.append("1) Propose a set of agents (name + 1-2 line purpose).")
+            prompt.append("2) For each agent, craft a concise prompt that leverages the metrics and hard-case patterns.")
+            prompt.append("3) Summarize the key screening standards implied by the metrics (focus on general + top specifics).")
+            prompt.append("4) Highlight risk patterns from hard cases and how agents should handle them.")
+            prompt.append("")
+            prompt.append("Aggregated metrics (cross-sample, deduplicated, top items):")
+            prompt.extend(metrics_lines if metrics_lines else ["(no metrics found)"])
+            prompt.append("")
+            prompt.append(f"Representative hard cases (up to {top_hard_cases}):")
+            prompt.extend(hard_lines if hard_lines else ["(no hard cases)"])
+            prompt.append("")
+            prompt.append("Suggested agent types (you may adjust/improve):")
+            for a in agent_requirements:
+                prompt.append(f"- {a}")
+            prompt.append("")
+            prompt.append("Output format suggestion (you may enrich):")
+            prompt.append("""{
   "agents": [
     {"name": "...", "purpose": "...", "prompt": "..."},
     ...
@@ -1072,18 +1361,65 @@ def main():
         default=0.75,
         help="跨样本 General 相似度阈值 (默认 0.75, 更宽松)",
     )
+    parser.add_argument(
+        "--embedding-config",
+        type=str,
+        default=None,
+        help="Embedding API 配置文件路径 (JSON), 或使用环境变量 EMBEDDING_API_KEY 等",
+    )
+    parser.add_argument(
+        "--use-embedding",
+        action="store_true",
+        default=False,
+        help="是否使用 Embedding API (默认: False, 使用 TF-IDF)",
+    )
+    parser.add_argument(
+        "--agents-catalog",
+        type=str,
+        default=None,
+        help="agents_catalog.json 文件路径,如果提供则从中读取agents列表用于prompt生成",
+    )
+    parser.add_argument(
+        "--simple-format",
+        action="store_true",
+        default=False,
+        help="使用简易版输出格式,只要求返回agents和prompts(一对多)",
+    )
     args = parser.parse_args()
 
     input_path = Path(args.input_file)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # 读取 embedding 配置
+    embedding_api_config = None
+    if args.use_embedding:
+        if args.embedding_config:
+            with open(args.embedding_config, 'r', encoding='utf-8') as f:
+                embedding_api_config = json.load(f)
+        else:
+            # 从环境变量读取
+            import os
+            api_key = os.getenv("EMBEDDING_API_KEY")
+            if api_key:
+                embedding_api_config = {
+                    "api_type": os.getenv("EMBEDDING_API_TYPE", "openai"),
+                    "api_key": api_key,
+                    "base_url": os.getenv("EMBEDDING_BASE_URL"),
+                    "model": os.getenv("EMBEDDING_MODEL", "text-embedding-3-small"),
+                    "timeout": int(os.getenv("EMBEDDING_TIMEOUT", "30")),
+                    "max_retries": int(os.getenv("EMBEDDING_MAX_RETRIES", "2")),
+                }
+                # 移除 None 值
+                embedding_api_config = {k: v for k, v in embedding_api_config.items() if v is not None}
+
     processor = MultiModelMetricsProcessor(
         difficulty_threshold=3.0,
         score_diff_threshold=2.5,
         similarity_threshold=args.similarity_threshold,
         general_similarity_threshold=args.general_sim_threshold,
-        use_embedding=True,  # 默认关闭，环境可用时可自行开启
+        use_embedding=args.use_embedding,
+        embedding_api_config=embedding_api_config,
     )
 
     samples_metrics, hard_cases = processor.process_file_per_sample(
@@ -1100,6 +1436,8 @@ def main():
     prompt_text = processor.build_decision_prompt(
         aggregated_metrics=global_metrics,
         hard_cases=hard_cases,
+        agents_catalog_path=args.agents_catalog,
+        simple_format=args.simple_format,
     )
 
     (output_dir / "samples_metrics.json").write_text(
@@ -1138,4 +1476,8 @@ if __name__=="__main__":
 #     --similarity-threshold 0.75 \
 #     --general-sim-threshold 0.80 \
 #     --global-sim-threshold 0.65 \
-#     --global-general-sim-threshold 0.75
+#     --global-general-sim-threshold 0.75 \
+#     --use-embedding \
+#     --embedding-config embedding_config.json \
+#     --agents-catalog /home/zhuxuzhou/VQA_Auto/whole_pipeline/decider/agents_catalog.json \
+#     --simple-format
