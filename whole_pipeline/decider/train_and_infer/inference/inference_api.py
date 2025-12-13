@@ -52,6 +52,9 @@ class ModelInference:
         """
         self.manager = VersionManager(registry_file=registry_file, base_dir=base_dir)
         
+        # 保存 version 用于后续检测模型类型
+        self.version = version
+        
         # 确定模型路径
         if model_path:
             self.model_path = Path(model_path)
@@ -66,6 +69,7 @@ class ModelInference:
             latest_version = self.manager.get_latest_version()
             if not latest_version:
                 raise ValueError("没有可用的模型版本")
+            self.version = latest_version
             model_path = self.manager.get_model_path(latest_version)
             self.model_path = Path(model_path)
             logger.info(f"使用最新版本 {latest_version}: {self.model_path}")
@@ -93,6 +97,60 @@ class ModelInference:
         self.processor = None
         self._load_model()
     
+    def _detect_model_type(self, model_path: Path) -> str:
+        """
+        检测模型类型
+        
+        返回:
+            "qwen2vl": Qwen2-VL 模型
+            "causal": 标准因果语言模型
+        """
+        model_path_str = str(model_path)
+        
+        # 方法1: 检查路径名称
+        if "Qwen2-VL" in model_path_str or "Qwen2VL" in model_path_str:
+            return "qwen2vl"
+        
+        # 方法2: 读取配置文件
+        config_file = model_path / "config.json"
+        if config_file.exists():
+            try:
+                import json
+                with open(config_file, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+                
+                # 检查 model_type 字段
+                model_type = config.get("model_type", "").lower()
+                if "qwen2vl" in model_type or "qwen2_vl" in model_type:
+                    return "qwen2vl"
+                
+                # 检查 architecture 字段
+                architectures = config.get("architectures", [])
+                if any("Qwen2VL" in arch or "Qwen2_VL" in arch for arch in architectures):
+                    return "qwen2vl"
+                
+                # 检查 _name_or_path 字段（如果存在）
+                name_or_path = config.get("_name_or_path", "")
+                if "Qwen2-VL" in name_or_path or "Qwen2VL" in name_or_path:
+                    return "qwen2vl"
+            except Exception as e:
+                logger.warning(f"读取配置文件失败: {e}，使用路径判断")
+        
+        # 方法3: 尝试从版本注册表获取信息
+        try:
+            if hasattr(self, 'version') and self.version:
+                version_info = self.manager.get_version(self.version)
+                if version_info:
+                    metadata = version_info.get("metadata", {})
+                    model_id = metadata.get("model_id", "")
+                    if "Qwen2-VL" in model_id or "Qwen2VL" in model_id:
+                        return "qwen2vl"
+        except Exception:
+            pass
+        
+        # 默认返回标准模型
+        return "causal"
+    
     def _load_model(self):
         """加载模型和处理器"""
         model_path_str = str(self.model_path)
@@ -100,13 +158,24 @@ class ModelInference:
         logger.info(f"加载模型: {model_path_str}")
         logger.info(f"设备: {self.device}, 数据类型: {self.torch_dtype}")
         
-        # 判断模型类型
-        if "Qwen2-VL" in model_path_str or "Qwen2VL" in model_path_str:
+        # 检测模型类型
+        model_type = self._detect_model_type(self.model_path)
+        logger.info(f"检测到的模型类型: {model_type}")
+        
+        # 准备加载参数
+        # transformers 的 from_pretrained 接受 dtype 参数（torch.dtype 类型）
+        # self.torch_dtype 已经是 torch.dtype 类型（在 __init__ 中已转换）
+        load_kwargs = {
+            "dtype": self.torch_dtype,  # 使用 dtype 而不是 torch_dtype（已弃用）
+            "device_map": "auto" if self.device == "cuda" else None,
+        }
+        
+        # 根据模型类型加载
+        if model_type == "qwen2vl":
             # Qwen2-VL 模型
             self.model = Qwen2VLForConditionalGeneration.from_pretrained(
                 model_path_str,
-                torch_dtype=self.torch_dtype,
-                device_map="auto" if self.device == "cuda" else None,
+                **load_kwargs
             )
             self.processor = AutoProcessor.from_pretrained(model_path_str)
             self.is_multimodal = True
@@ -114,8 +183,7 @@ class ModelInference:
             # 标准语言模型
             self.model = AutoModelForCausalLM.from_pretrained(
                 model_path_str,
-                torch_dtype=self.torch_dtype,
-                device_map="auto" if self.device == "cuda" else None,
+                **load_kwargs
             )
             self.processor = AutoTokenizer.from_pretrained(model_path_str)
             self.is_multimodal = False
