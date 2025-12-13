@@ -1,0 +1,16 @@
+{
+  "agents": [],
+  "prompts": {},
+  "reasoning": "",
+  "raw_output": "{\n    \"agents\": [\n        {\n            \"name\": \"quality_filter_agent\",\n            \"prompts\": [\n                \"Check if the answer accurately identifies and describes the objects present in the images.\",\n                \"Verify if the answer correctly interprets the context of the scene and the relationships between the objects.\",\n                \"Ensure the answer correctly infers the activities taking place based on the visual cues in the images.\",\n                \"Confirm if the answer effectively combines details and inferences from all provided images to form a cohesive and comprehensive description of the overall scenario.\",\n                \"Verify if the answer accurately identifies specific objects and their distinguishing attributes within the images.\",\n                \"Assess if the answer is organized logically and provides a detailed breakdown of the scene and activities.\",\n                \"Validate if the answer correctly verifies the presence or absence of specific entities across both provided images.\",\n                \"Check if the answer includes all items that satisfy the logical condition described in the question.\",\n                \"Confirm if the list of entities provided in the answer is factually correct and free from hallucinations or omissions.\",\n                \"Verify if the answer correctly identifies and consistently describes the same objects across multiple images.\",\n                \"Evaluate if the answer accurately interprets subtle but defining visual features of an object.\",\n                \"Ensure all claims about the presence and location of objects in the answer are directly verifiable from the visual evidence in the images.\"\n            ]\n        }\n    ]\n}",
+  "prompt_mode": "direct",
+  "timestamp": "2025-12-13T10:10:43.148279",
+  "model_version": "v0_base",
+  "report": "数据集报告...",
+  "available_agents": [
+    "quality_filter_agent",
+    "deduplication_filter"
+  ],
+  "max_tokens": 2048,
+  "temperature": 0.7
+}
