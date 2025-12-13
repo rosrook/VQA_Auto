@@ -7,6 +7,23 @@ import argparse
 from pathlib import Path
 from typing import Dict, List, Optional, Union, Any
 import logging
+from datetime import datetime
+
+
+def format_json_for_readability(data):
+    """
+    格式化 JSON 数据，使其更易读
+    递归处理字典和列表中的字符串
+    """
+    if isinstance(data, dict):
+        return {key: format_json_for_readability(value) for key, value in data.items()}
+    elif isinstance(data, list):
+        return [format_json_for_readability(item) for item in data]
+    elif isinstance(data, str):
+        # 保持字符串原样，JSON 会自动处理转义序列
+        return data
+    else:
+        return data
 
 from transformers import (
     Qwen2VLForConditionalGeneration,
@@ -198,7 +215,7 @@ class ModelInference:
         self,
         prompt: Union[str, List[Dict[str, str]]],
         images: Optional[List] = None,
-        max_new_tokens: int = 512,
+        max_new_tokens: int = 2048,  # 增加默认值，避免截断
         temperature: float = 0.7,
         top_p: float = 0.9,
         do_sample: bool = True,
@@ -221,20 +238,45 @@ class ModelInference:
         """
         # 准备输入
         if self.is_multimodal:
-            # 多模态输入
+            # Qwen2VL 多模态输入处理
+            # 根据训练代码，Qwen2VL 的 processor 需要先应用 chat template
             if isinstance(prompt, str):
-                # 转换为对话格式
+                # 字符串转换为对话格式
                 messages = [{"role": "user", "content": prompt}]
             else:
+                # 已经是对话格式列表
                 messages = prompt
             
-            # 处理输入
-            text_inputs = self.processor(
-                text=messages,
-                images=images,
-                return_tensors="pt",
-                padding=True,
-            )
+            # 使用 tokenizer 的 apply_chat_template 应用 chat template
+            # 这与训练代码中的 maybe_apply_chat_template 逻辑一致
+            # Qwen2VL 的 processor.tokenizer 会自动处理对话格式
+            if hasattr(self.processor, 'tokenizer') and hasattr(self.processor.tokenizer, 'apply_chat_template'):
+                logger.info("Has tokenizer and chat template")
+                # 应用 chat template，转换为文本字符串
+                formatted_text = self.processor.tokenizer.apply_chat_template(
+                    messages,
+                    tokenize=False,
+                    add_generation_prompt=True
+                )
+                print("转换后的字符串：", formatted_text)
+                # 传递格式化后的文本字符串给 processor
+                text_inputs = self.processor(
+                    text=formatted_text,
+                    images=images,
+                    return_tensors="pt",
+                    padding=True,
+                )
+            else:
+                logger.info("No apply chat template, warning!")
+                # 如果没有 apply_chat_template，直接传递对话格式
+                # processor 可能会自动处理，但这不是推荐方式
+                text_inputs = self.processor(
+                    text=messages,
+                    images=images,
+                    return_tensors="pt",
+                    padding=True,
+                )
+            
             text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
         else:
             # 文本输入
@@ -253,34 +295,75 @@ class ModelInference:
             text_inputs = {k: v.to(self.device) for k, v in text_inputs.items()}
         
         # 生成配置
+        # 确保 pad_token_id 和 eos_token_id 正确设置
+        pad_token_id = getattr(self.processor.tokenizer, 'pad_token_id', None)
+        if pad_token_id is None:
+            pad_token_id = getattr(self.processor.tokenizer, 'eos_token_id', None)
+        
+        eos_token_id = getattr(self.processor.tokenizer, 'eos_token_id', None)
+        
         generation_config = GenerationConfig(
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             top_p=top_p,
             do_sample=do_sample,
-            pad_token_id=self.processor.tokenizer.pad_token_id,
-            eos_token_id=self.processor.tokenizer.eos_token_id,
+            pad_token_id=pad_token_id,
+            eos_token_id=eos_token_id,
+            # 添加其他重要参数以防止截断
+            repetition_penalty=1.1,  # 防止重复
             **kwargs
         )
         
         # 生成
+        # 对于 Qwen2VL，可能需要特殊处理
         with torch.no_grad():
-            outputs = self.model.generate(
+            generate_kwargs = {
                 **text_inputs,
-                generation_config=generation_config,
-            )
+                "generation_config": generation_config,
+            }
+            
+            # 如果 kwargs 中有 max_length，也要考虑
+            if "max_length" not in kwargs:
+                # 计算最大长度：输入长度 + max_new_tokens
+                input_length = text_inputs["input_ids"].shape[1]
+                generate_kwargs["max_length"] = input_length + max_new_tokens
+            
+            outputs = self.model.generate(**generate_kwargs)
         
         # 解码
+        # 只解码新生成的部分（跳过输入部分）
+        input_length = text_inputs["input_ids"].shape[1]
+        
         if self.is_multimodal:
+            # Qwen2VL 多模态模型
             generated_text = self.processor.batch_decode(
-                outputs[:, text_inputs["input_ids"].shape[1]:],
-                skip_special_tokens=True
+                outputs[:, input_length:],
+                skip_special_tokens=True  # 跳过特殊token，但保留文本内容
             )[0]
+            
+            # 检查是否有截断（如果输出长度达到 max_new_tokens，可能被截断）
+            generated_length = outputs.shape[1] - input_length
+            if generated_length >= max_new_tokens:
+                logger.warning(
+                    f"⚠️ 生成达到最大长度限制 ({max_new_tokens} tokens)，"
+                    f"实际生成了 {generated_length} tokens。"
+                    f"如果输出被截断，请增加 --max-new-tokens 参数（例如: --max-new-tokens 4096）。"
+                )
         else:
+            # 标准语言模型
             generated_text = self.processor.decode(
-                outputs[0][text_inputs["input_ids"].shape[1]:],
+                outputs[0][input_length:],
                 skip_special_tokens=True
             )
+            
+            # 检查是否有截断
+            generated_length = outputs.shape[1] - input_length
+            if generated_length >= max_new_tokens:
+                logger.warning(
+                    f"⚠️ 生成达到最大长度限制 ({max_new_tokens} tokens)，"
+                    f"实际生成了 {generated_length} tokens。"
+                    f"如果输出被截断，请增加 --max-new-tokens 参数（例如: --max-new-tokens 4096）。"
+                )
         
         return generated_text
     
@@ -365,10 +448,16 @@ def main():
     parser.add_argument("--prompt-mode", type=str, default="system_prompt",
                        choices=["system_prompt", "direct"],
                        help="Prompt模式: 'system_prompt' (使用系统提示, 默认) 或 'direct' (直接输入report)")
-    parser.add_argument("--max-new-tokens", type=int, default=512,
-                       help="最大生成token数")
+    parser.add_argument("--max-new-tokens", type=int, default=2048,
+                       help="最大生成token数（默认: 2048，避免截断）")
     parser.add_argument("--temperature", type=float, default=0.7,
                        help="温度参数")
+    
+    # 输出保存
+    parser.add_argument("--output", type=str, default=None,
+                       help="保存输出到文件路径（JSON格式）")
+    parser.add_argument("--output-dir", type=str, default=None,
+                       help="保存输出到目录（自动生成文件名）")
     
     # 交互模式
     parser.add_argument("--interactive", action="store_true",
@@ -420,6 +509,7 @@ def main():
         return 0
     
     # 单次推理
+    result = None
     if args.report and args.available_agents:
         # Agent 选择任务
         result = inference.predict_agent_selection(
@@ -441,6 +531,109 @@ def main():
     else:
         parser.print_help()
         return 1
+    
+    # 保存输出到文件
+    if result is not None:
+        output_path = None
+        
+        # 确定输出路径
+        if args.output:
+            output_path = Path(args.output)
+        elif args.output_dir:
+            # 自动生成文件名
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            if args.report and args.available_agents:
+                filename = f"inference_result_{timestamp}.json"
+            else:
+                filename = f"generation_result_{timestamp}.json"
+            output_path = Path(args.output_dir) / filename
+        
+        # 保存文件
+        if output_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # 准备保存的数据
+            if isinstance(result, str):
+                # 普通文本生成结果
+                save_data = {
+                    "prompt": args.prompt,
+                    "result": result,
+                    "timestamp": datetime.now().isoformat(),
+                    "model_version": args.version or "latest",
+                    "max_new_tokens": args.max_new_tokens,
+                    "temperature": args.temperature,
+                }
+            else:
+                # Agent 选择任务结果（已经是字典）
+                save_data = {
+                    **result,
+                    "timestamp": datetime.now().isoformat(),
+                    "model_version": args.version or "latest",
+                    "report": args.report,
+                    "available_agents": args.available_agents,
+                    "prompt_mode": args.prompt_mode,
+                    "max_new_tokens": args.max_new_tokens,
+                    "temperature": args.temperature,
+                }
+            
+            # 格式化数据（处理转义字符）
+            save_data = format_json_for_readability(save_data)
+            
+            # 保存 JSON 文件
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(save_data, f, ensure_ascii=False, indent=2)
+            
+            # 同时保存一个更易读的文本版本
+            text_output_path = output_path.with_suffix('.txt')
+            with open(text_output_path, "w", encoding="utf-8") as f:
+                f.write("=" * 60 + "\n")
+                f.write("推理结果\n")
+                f.write("=" * 60 + "\n\n")
+                
+                if isinstance(result, str):
+                    f.write("生成结果:\n")
+                    f.write("-" * 40 + "\n")
+                    f.write(f"{result}\n\n")
+                else:
+                    if "agents" in save_data:
+                        f.write("选择的 Agents:\n")
+                        for agent in save_data.get("agents", []):
+                            f.write(f"  - {agent}\n")
+                        f.write("\n")
+                    
+                    if "prompts" in save_data:
+                        f.write("Agent Prompts:\n")
+                        for agent, prompt in save_data.get("prompts", {}).items():
+                            f.write(f"\n{agent}:\n")
+                            f.write("-" * 40 + "\n")
+                            f.write(f"{prompt}\n")
+                        f.write("\n")
+                    
+                    if "reasoning" in save_data:
+                        f.write("推理过程:\n")
+                        f.write("-" * 40 + "\n")
+                        f.write(f"{save_data.get('reasoning', '')}\n\n")
+                    
+                    if "raw_output" in save_data:
+                        f.write("原始输出:\n")
+                        f.write("-" * 40 + "\n")
+                        f.write(f"{save_data.get('raw_output', '')}\n\n")
+                
+                f.write("=" * 60 + "\n")
+                f.write("元数据\n")
+                f.write("=" * 60 + "\n")
+                f.write(f"时间戳: {save_data.get('timestamp', '')}\n")
+                f.write(f"模型版本: {save_data.get('model_version', '')}\n")
+                if "prompt_mode" in save_data:
+                    f.write(f"Prompt 模式: {save_data.get('prompt_mode', '')}\n")
+                f.write(f"最大 Tokens: {save_data.get('max_new_tokens', args.max_new_tokens)}\n")
+                f.write(f"温度: {save_data.get('temperature', args.temperature)}\n")
+            
+            logger.info(f"✓ 输出已保存到: {output_path}")
+            logger.info(f"✓ 文本版本已保存到: {text_output_path}")
+            print(f"\n✓ 输出已保存到:")
+            print(f"  JSON: {output_path}")
+            print(f"  文本: {text_output_path}")
     
     return 0
 
