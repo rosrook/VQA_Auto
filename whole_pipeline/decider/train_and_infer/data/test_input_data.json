@@ -1,0 +1,49 @@
+[
+    {
+        "report": "Dataset contains 100 samples with moderate duplication rate (15%). Quality issues: 8% samples have incomplete information. Average text length: 200 tokens. Some samples have low image quality.",
+        "agent_list": ["quality_filter_agent", "deduplication_filter", "length_filter"],
+        "filtered_datasets": [
+            {
+                "data_ids": [0, 1, 2, 5, 7, 9, 12, 15, 18, 20, 22, 25, 28, 30],
+                "metadata": {
+                    "filter_reason": "High quality samples with complete information",
+                    "sample_count": 14
+                }
+            }
+        ]
+    },
+    {
+        "report": "Dataset contains 50 samples with high duplication rate (25%). Text quality is good but images are low resolution. Average image resolution: 256x256. Some samples missing annotations.",
+        "agent_list": ["quality_filter_agent", "deduplication_filter", "length_filter"],
+        "filtered_datasets": [
+            {
+                "data_ids": [0, 3, 5, 8, 10, 12, 15, 18],
+                "metadata": {
+                    "filter_reason": "Samples with good text and acceptable images",
+                    "sample_count": 8
+                }
+            },
+            {
+                "data_ids": [1, 4, 7, 11, 14],
+                "metadata": {
+                    "filter_reason": "High quality samples after deduplication",
+                    "sample_count": 5
+                }
+            }
+        ]
+    },
+    {
+        "report": "Small dataset with 30 samples. Low duplication (5%) but 20% samples have formatting issues. Average text length: 150 tokens. Images are high quality.",
+        "agent_list": ["quality_filter_agent", "deduplication_filter", "length_filter"],
+        "filtered_datasets": [
+            {
+                "data_ids": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20],
+                "metadata": {
+                    "filter_reason": "Clean samples without formatting issues",
+                    "sample_count": 11
+                }
+            }
+        ]
+    }
+]
+
