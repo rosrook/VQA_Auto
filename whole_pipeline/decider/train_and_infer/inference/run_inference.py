@@ -24,6 +24,9 @@ def main():
                        help="数据集报告文本")
     parser.add_argument("--available-agents", type=str, nargs="+", required=True,
                        help="可用的agent列表")
+    parser.add_argument("--prompt-mode", type=str, default="system_prompt",
+                       choices=["system_prompt", "direct"],
+                       help="Prompt模式: 'system_prompt' (使用系统提示, 默认) 或 'direct' (直接输入report)")
     parser.add_argument("--max-tokens", type=int, default=512,
                        help="最大生成token数")
     parser.add_argument("--temperature", type=float, default=0.7,
@@ -57,9 +60,11 @@ def main():
     # 运行推理
     try:
         print("生成预测...")
+        print(f"Prompt模式: {args.prompt_mode}")
         result = inference.predict_agent_selection(
             report=args.report,
             available_agents=args.available_agents,
+            prompt_mode=args.prompt_mode,
             max_new_tokens=args.max_tokens,
             temperature=args.temperature
         )

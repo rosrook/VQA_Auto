@@ -37,13 +37,28 @@ python scripts/download_and_register_model.py \
 
 ### 2. 使用未训练模型进行推理
 
-拉取模型后，可以直接使用未训练的模型进行推理：
+拉取模型后，可以直接使用未训练的模型进行推理。系统提供两种 prompt 模式：
+
+#### 模式1：使用系统提示（默认）
 
 ```bash
 python inference/run_inference.py \
     --version v0_base \
     --report "数据集报告..." \
-    --available-agents quality_filter_agent deduplication_filter
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode system_prompt
+```
+
+#### 模式2：直接输入 report
+
+直接将 report 作为完整的 prompt，转换为对话格式（`{"role": "user", "content": report}`），不加系统提示：
+
+```bash
+python inference/run_inference.py \
+    --version v0_base \
+    --report "数据集报告..." \
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode direct
 ```
 
 ### 3. 准备训练数据
@@ -63,10 +78,19 @@ python training/grpo.py --config training/test_config.yaml
 ### 5. 使用训练后的模型进行推理
 
 ```bash
+# 使用系统提示模式（默认）
 python inference/run_inference.py \
     --version v20241212_001 \
     --report "数据集报告..." \
-    --available-agents quality_filter_agent deduplication_filter
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode system_prompt
+
+# 或使用直接输入模式
+python inference/run_inference.py \
+    --version v20241212_001 \
+    --report "数据集报告..." \
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode direct
 ```
 
 ## 主要功能

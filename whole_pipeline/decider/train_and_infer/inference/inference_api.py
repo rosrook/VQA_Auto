@@ -221,6 +221,7 @@ class ModelInference:
         report: str,
         available_agents: List[str],
         system_prompt: Optional[str] = None,
+        prompt_mode: str = "system_prompt",
         **generation_kwargs
     ) -> Dict[str, Any]:
         """
@@ -229,7 +230,10 @@ class ModelInference:
         参数:
             report: 数据集报告
             available_agents: 可用的 agent 列表
-            system_prompt: 系统提示（如果为 None，使用默认）
+            system_prompt: 系统提示（如果为 None，使用默认，仅在 prompt_mode="system_prompt" 时使用）
+            prompt_mode: Prompt 模式
+                - "system_prompt": 使用系统提示和格式化输入（默认）
+                - "direct": 直接将 report 作为完整的 prompt，转换为对话格式（{"role": "user", "content": report}）
             **generation_kwargs: 生成参数
             
         返回:
@@ -240,15 +244,24 @@ class ModelInference:
         sys.path.insert(0, str(Path(__file__).parent.parent / "training"))
         from grpo import create_system_prompt, parse_agent_selection
         
-        # 创建系统提示
-        if system_prompt is None:
-            system_prompt = create_system_prompt(available_agents)
-        
-        # 构建对话
-        messages = [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": f"REPORT IS :\n {report}"},
-        ]
+        # 根据 prompt_mode 构建输入
+        if prompt_mode == "direct":
+            # 模式2：直接将 report 作为完整的 prompt，转换为对话格式
+            messages = [
+                {"role": "user", "content": report}
+            ]
+        elif prompt_mode == "system_prompt":
+            # 模式1：使用系统提示（默认）
+            if system_prompt is None:
+                system_prompt = create_system_prompt(available_agents)
+            
+            # 构建对话
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": f"REPORT IS :\n {report}"},
+            ]
+        else:
+            raise ValueError(f"不支持的 prompt_mode: {prompt_mode}。可选值: 'system_prompt', 'direct'")
         
         # 生成
         generated_text = self.generate(messages, **generation_kwargs)
@@ -256,6 +269,7 @@ class ModelInference:
         # 解析结果
         result = parse_agent_selection(generated_text)
         result["raw_output"] = generated_text
+        result["prompt_mode"] = prompt_mode
         
         return result
 
@@ -280,6 +294,9 @@ def main():
     parser.add_argument("--report", type=str, help="数据集报告（用于agent选择任务）")
     parser.add_argument("--available-agents", type=str, nargs="+",
                        help="可用的agent列表")
+    parser.add_argument("--prompt-mode", type=str, default="system_prompt",
+                       choices=["system_prompt", "direct"],
+                       help="Prompt模式: 'system_prompt' (使用系统提示, 默认) 或 'direct' (直接输入report)")
     parser.add_argument("--max-new-tokens", type=int, default=512,
                        help="最大生成token数")
     parser.add_argument("--temperature", type=float, default=0.7,
@@ -340,6 +357,7 @@ def main():
         result = inference.predict_agent_selection(
             report=args.report,
             available_agents=args.available_agents,
+            prompt_mode=args.prompt_mode,
             max_new_tokens=args.max_new_tokens,
             temperature=args.temperature
         )

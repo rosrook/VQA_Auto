@@ -54,13 +54,28 @@ python version/version_manager.py register-base \
 
 #### 使用未训练模型进行推理
 
-拉取模型后，可以直接使用未训练的模型进行推理：
+拉取模型后，可以直接使用未训练的模型进行推理。系统提供两种 prompt 模式：
+
+**模式1：使用系统提示（默认）**
 
 ```bash
 python inference/run_inference.py \
     --version v0_base \
     --report "Dataset contains 100 samples with 15% duplication rate..." \
-    --available-agents quality_filter_agent deduplication_filter
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode system_prompt
+```
+
+**模式2：直接输入 report**
+
+直接将 report 作为完整的 prompt，转换为对话格式（`{"role": "user", "content": report}`），不加系统提示：
+
+```bash
+python inference/run_inference.py \
+    --version v0_base \
+    --report "Dataset contains 100 samples with 15% duplication rate..." \
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode direct
 ```
 
 ### 1. 训练模型（自动注册版本）
@@ -94,16 +109,25 @@ python version_manager.py latest
 #### 方式 1: 使用推理脚本（推荐）
 
 ```bash
-python run_inference.py \
+# 使用系统提示模式（默认）
+python inference/run_inference.py \
     --version v20241212_001 \
     --report "Dataset contains 100 samples with 15% duplication rate..." \
-    --available-agents quality_filter_agent deduplication_filter length_filter
+    --available-agents quality_filter_agent deduplication_filter length_filter \
+    --prompt-mode system_prompt
+
+# 或使用直接输入模式
+python inference/run_inference.py \
+    --version v20241212_001 \
+    --report "Dataset contains 100 samples with 15% duplication rate..." \
+    --available-agents quality_filter_agent deduplication_filter length_filter \
+    --prompt-mode direct
 ```
 
 #### 方式 2: 使用推理API（Python）
 
 ```python
-from inference_api import ModelInference
+from inference.inference_api import ModelInference
 
 # 初始化（使用版本号）
 inference = ModelInference(version="v20241212_001")
@@ -111,10 +135,18 @@ inference = ModelInference(version="v20241212_001")
 # 或使用最新版本
 inference = ModelInference()  # 自动使用最新版本
 
-# 预测 agent 选择
+# 预测 agent 选择 - 使用系统提示模式（默认）
 result = inference.predict_agent_selection(
     report="数据集报告文本...",
-    available_agents=["quality_filter_agent", "deduplication_filter"]
+    available_agents=["quality_filter_agent", "deduplication_filter"],
+    prompt_mode="system_prompt"  # 默认值
+)
+
+# 或使用直接输入模式
+result = inference.predict_agent_selection(
+    report="数据集报告文本...",
+    available_agents=["quality_filter_agent", "deduplication_filter"],
+    prompt_mode="direct"  # 直接将 report 作为完整的 prompt，转换为对话格式
 )
 
 print(result)
@@ -125,7 +157,8 @@ print(result)
 #         "deduplication_filter": "prompt text..."
 #     },
 #     "reasoning": "...",
-#     "raw_output": "..."
+#     "raw_output": "...",
+#     "prompt_mode": "system_prompt"  # 或 "direct"
 # }
 ```
 
@@ -250,7 +283,10 @@ decider/
 
 - `report`: 数据集报告文本
 - `available_agents`: 可用的agent列表
-- `system_prompt`: 系统提示（可选，默认自动生成）
+- `prompt_mode`: Prompt模式
+  - `"system_prompt"` (默认): 使用系统提示和格式化输入，构建包含 system 和 user 的对话格式
+  - `"direct"`: 直接将 report 作为完整的 prompt，转换为对话格式（`{"role": "user", "content": report}`），不加系统提示
+- `system_prompt`: 系统提示（可选，默认自动生成，仅在 `prompt_mode="system_prompt"` 时使用）
 - `max_new_tokens`: 最大生成token数（默认: 512）
 - `temperature`: 温度参数（默认: 0.7）
 - `top_p`: top-p采样（默认: 0.9）
@@ -271,22 +307,31 @@ python grpo.py --config test_config.yaml
 ### 示例 2: 使用特定版本进行推理
 
 ```bash
-# 使用版本号
-python run_inference.py \
+# 使用版本号 - 系统提示模式（默认）
+python inference/run_inference.py \
     --version v20241212_001 \
     --report "Dataset contains 100 samples..." \
-    --available-agents quality_filter_agent deduplication_filter
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode system_prompt
+
+# 使用版本号 - 直接输入模式
+python inference/run_inference.py \
+    --version v20241212_001 \
+    --report "Dataset contains 100 samples..." \
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode direct
 
 # 使用最新版本（不指定 --version）
-python run_inference.py \
+python inference/run_inference.py \
     --report "Dataset contains 100 samples..." \
-    --available-agents quality_filter_agent deduplication_filter
+    --available-agents quality_filter_agent deduplication_filter \
+    --prompt-mode system_prompt
 ```
 
 ### 示例 3: Python API 使用
 
 ```python
-from inference_api import ModelInference
+from inference.inference_api import ModelInference
 
 # 初始化
 inference = ModelInference(version="v20241212_001")
@@ -304,10 +349,20 @@ available_agents = [
     "length_filter"
 ]
 
-# 生成预测
+# 生成预测 - 使用系统提示模式（默认）
 result = inference.predict_agent_selection(
     report=report,
     available_agents=available_agents,
+    prompt_mode="system_prompt",  # 默认值
+    max_new_tokens=512,
+    temperature=0.7
+)
+
+# 或使用直接输入模式
+result = inference.predict_agent_selection(
+    report=report,
+    available_agents=available_agents,
+    prompt_mode="direct",  # 直接将 report 作为输入
     max_new_tokens=512,
     temperature=0.7
 )
@@ -316,6 +371,7 @@ result = inference.predict_agent_selection(
 print("选择的agents:", result["agents"])
 print("Prompts:", result["prompts"])
 print("推理过程:", result["reasoning"])
+print("使用的模式:", result["prompt_mode"])
 ```
 
 ## 常见问题
