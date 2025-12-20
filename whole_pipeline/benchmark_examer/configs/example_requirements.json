@@ -1,0 +1,5 @@
+{
+  "task_types": ["vqa"],
+  "min_samples": 10,
+  "description": "VQA任务类型的benchmark，至少10个样本"
+}

@@ -1,0 +1,55 @@
+{
+    "description": "Benchmarks with native task/question taxonomy. Suitable for immediate benchmark-driven feedback testing.",
+    "benchmarks": [
+      {
+        "name": "GQA",
+        "source": "huggingface",
+        "hf_id": "lmms-lab/GQA",
+        "config": "testdev_balanced_images",
+        "available_splits": ["testdev"],
+        "default_split": "testdev",
+        "native_taxonomy_fields": [
+            "question_type",
+            "semantic"
+        ],
+        "note": "GQA dataset. Using testdev_balanced_images config."
+      },
+      {
+        "name": "ChartQA",
+        "source": "huggingface",
+        "hf_id": "ahmed-masry/ChartQA",
+        "config": null,
+        "available_splits": ["train", "val", "test"],
+        "default_split": "val",
+        "native_taxonomy_fields": [
+          "chart_type"
+        ],
+        "note": "Taxonomy is coarse-grained but usable for structured feedback."
+      },
+      {
+        "name": "MMBench",
+        "source": "huggingface",
+        "hf_id": "lmms-lab/MMBench",
+        "config": "en",
+        "available_splits": ["dev", "test"],
+        "default_split": "dev",
+        "native_taxonomy_fields": [
+          "category",
+          "l2-category"
+        ],
+        "note": "Human-defined capability groups. Using 'en' (English) config."
+      },
+      {
+        "name": "SEED-Bench",
+        "source": "huggingface",
+        "hf_id": "lmms-lab/SEED-Bench",
+        "config": null,
+        "available_splits": ["test"],
+        "default_split": "test",
+        "native_taxonomy_fields": [
+          "question_type_id"
+        ],
+        "note": "SEED-Bench evaluation dataset."
+      }
+    ]
+}

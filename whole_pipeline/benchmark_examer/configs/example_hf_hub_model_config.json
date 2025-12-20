@@ -1,0 +1,9 @@
+{
+  "type": "huggingface_hub",
+  "params": {
+    "model_id": "Qwen/Qwen-VL-Chat",
+    "api_token": "your-hf-token-here",
+    "timeout": 30.0
+  },
+  "comment": "使用HuggingFace Hub Inference API，无需本地GPU，但需要API token"
+}

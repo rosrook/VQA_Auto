@@ -1,0 +1,10 @@
+{
+  "benchmarks": [
+    {
+      "name": "vqa_benchmark",
+      "type": "example_vqa",
+      "data_path": "data/vqa_test.json",
+      "description": "VQA测试benchmark"
+    }
+  ]
+}
