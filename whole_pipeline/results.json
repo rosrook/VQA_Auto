@@ -1,0 +1,28 @@
+{
+  "model_info": {
+    "name": "Salesforce/blip-vqa-base",
+    "type": "huggingface_local",
+    "device": "cuda",
+    "model_class": "blip",
+    "is_vision_model": true
+  },
+  "summary": {
+    "total_benchmarks": 1,
+    "poor_performers": [
+      "GQA"
+    ],
+    "overall_accuracy": 0.0
+  },
+  "benchmark_results": [
+    {
+      "benchmark_name": "GQA",
+      "total_tasks": 0,
+      "correct_count": 0,
+      "accuracy": 0.0,
+      "average_score": 0.0,
+      "is_poor_performer": true,
+      "failed_cases": [],
+      "all_results": []
+    }
+  ]
+}

@@ -5,12 +5,13 @@
 from .model_adapter import BaseModelAdapter, ModelAdapterFactory
 from .benchmark_manager import BenchmarkManager
 from .test_executor import TestExecutor
-from .result_analyzer import ResultAnalyzer
+from .result_analyzer import ResultAnalyzer, BenchmarkSummary
 
 __all__ = [
     'BaseModelAdapter',
     'ModelAdapterFactory',
     'BenchmarkManager',
     'TestExecutor',
-    'ResultAnalyzer'
+    'ResultAnalyzer',
+    'BenchmarkSummary'
 ]
