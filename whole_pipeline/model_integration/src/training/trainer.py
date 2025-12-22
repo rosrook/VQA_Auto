@@ -255,6 +255,9 @@ class Trainer:
                 # 在移动到GPU后，再次验证（如果可能）
                 self._validate_batch_on_device(batch, batch_idx)
                 
+                # 在模型forward之前，最后验证一次
+                self._final_validate_before_forward(batch, batch_idx)
+                
                 # 前向传播
                 loss = self._train_step(batch)
             except RuntimeError as e:
@@ -317,6 +320,9 @@ class Trainer:
                                                 if invalid_count > 0 and invalid_count < 100:
                                                     invalid_values = value[invalid_mask].unique().tolist()
                                                     debug_logger.error(f"    非法值列表: {invalid_values}")
+                                            else:
+                                                # 即使值在范围内，也记录一下，帮助调试
+                                                debug_logger.error(f"    ✅ token ID范围正常: [{min_val}, {max_val}] vs vocab_size={effective_vocab_size}")
                                 
                                 if 'mask' in key.lower():
                                     unique_values = value.unique().tolist()
@@ -583,20 +589,32 @@ class Trainer:
             debug_logger = get_debug_logger()
             debug_logger.info(f"📊 input_ids统计: min={min_id}, max={max_id}, vocab_size={effective_vocab_size}")
             
-            # 检查并修复
+            # 检查并修复（强制修复，确保所有值都在有效范围内）
             if effective_vocab_size is not None:
-                if max_id >= effective_vocab_size or min_id < 0:
-                    debug_logger.error(f"❌ input_ids超出范围: [{min_id}, {max_id}] vs [0, {effective_vocab_size-1}]")
+                # 找出所有非法值
+                invalid_mask = (input_ids_cpu < 0) | (input_ids_cpu >= effective_vocab_size)
+                invalid_count = invalid_mask.sum().item()
+                
+                if invalid_count > 0:
+                    debug_logger.error(f"❌ 发现 {invalid_count} 个非法input_ids值")
+                    debug_logger.error(f"   范围: [{min_id}, {max_id}] vs [0, {effective_vocab_size-1}]")
                     
-                    # 修复策略
+                    # 修复策略：将所有非法值clamp到有效范围
                     pad_id = getattr(self.model.config, 'pad_token_id', 0)
                     unk_id = getattr(self.model.config, 'unk_token_id', pad_id)
                     
-                    debug_logger.warning(f"   🔧 Clamping到有效范围...")
+                    debug_logger.warning(f"   🔧 Clamping所有值到有效范围...")
                     input_ids_cpu = torch.clamp(input_ids_cpu, 0, effective_vocab_size - 1)
                     input_ids = input_ids_cpu
                     
-                    debug_logger.info(f"   ✅ 修复后: min={input_ids.min().item()}, max={input_ids.max().item()}")
+                    # 验证修复后
+                    max_after = input_ids.max().item()
+                    min_after = input_ids.min().item()
+                    debug_logger.info(f"   ✅ 修复后: min={min_after}, max={max_after}")
+                else:
+                    # 即使没有非法值，也确保值在合理范围内
+                    if max_id > effective_vocab_size * 0.9:  # 如果接近上限，记录警告
+                        debug_logger.warning(f"   ⚠️  input_ids最大值接近vocab_size上限: {max_id} / {effective_vocab_size}")
             
             # 确保input_ids在CPU上，然后再移动到GPU
             if input_ids.is_cuda:
@@ -744,6 +762,75 @@ class Trainer:
                     prepared_batch[key] = value
         
         return prepared_batch
+    
+    def _final_validate_before_forward(self, batch: Dict[str, Any], batch_idx: int):
+        """
+        在模型forward之前进行最后的验证
+        
+        这是最后一道防线，确保所有数据都正确
+        """
+        if batch_idx > 0:  # 只在第一个batch时详细检查
+            return
+        
+        debug_logger = get_debug_logger()
+        vocab_size = None
+        text_vocab_size = None
+        if hasattr(self.model, 'config'):
+            vocab_size = getattr(self.model.config, 'vocab_size', None)
+            if hasattr(self.model.config, 'text_config'):
+                text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
+        effective_vocab_size = text_vocab_size or vocab_size
+        
+        if not effective_vocab_size:
+            return
+        
+        debug_logger.info("=" * 60)
+        debug_logger.info("🔍 模型forward前的最后验证...")
+        
+        for key in ['input_ids', 'labels', 'decoder_input_ids']:
+            if key in batch and isinstance(batch[key], torch.Tensor):
+                tensor = batch[key]
+                try:
+                    # 尝试在GPU上检查（如果可能）
+                    if tensor.is_cuda:
+                        # 对于CUDA tensor，先尝试在GPU上检查
+                        try:
+                            max_val = tensor.max().item()
+                            min_val = tensor.min().item()
+                            
+                            if key == 'labels':
+                                valid_tensor = tensor[tensor != -100]
+                                if len(valid_tensor) > 0:
+                                    max_valid = valid_tensor.max().item()
+                                    min_valid = valid_tensor.min().item()
+                                    
+                                    if max_valid >= effective_vocab_size or min_valid < 0:
+                                        debug_logger.error(
+                                            f"❌ {key}在GPU上仍有非法值: [{min_valid}, {max_valid}] vs vocab_size={effective_vocab_size}"
+                                        )
+                                        # 尝试修复
+                                        invalid_mask = (tensor != -100) & ((tensor < 0) | (tensor >= effective_vocab_size))
+                                        tensor[invalid_mask] = -100
+                                        debug_logger.warning(f"   已修复{key}的非法值")
+                                    else:
+                                        debug_logger.info(f"   ✅ {key}值正常: [{min_valid}, {max_valid}]")
+                            else:
+                                if max_val >= effective_vocab_size or min_val < 0:
+                                    debug_logger.error(
+                                        f"❌ {key}在GPU上仍有非法值: [{min_val}, {max_val}] vs vocab_size={effective_vocab_size}"
+                                    )
+                                    # 尝试修复
+                                    tensor = torch.clamp(tensor, 0, effective_vocab_size - 1)
+                                    batch[key] = tensor
+                                    debug_logger.warning(f"   已修复{key}的非法值")
+                                else:
+                                    debug_logger.info(f"   ✅ {key}值正常: [{min_val}, {max_val}]")
+                        except RuntimeError as e:
+                            debug_logger.warning(f"   无法在GPU上检查{key}: {e}")
+                except Exception as e:
+                    debug_logger.warning(f"   检查{key}时出错: {e}")
+        
+        debug_logger.info("=" * 60)
     
     def _validate_batch_on_device(self, batch: Dict[str, Any], batch_idx: int):
         """
