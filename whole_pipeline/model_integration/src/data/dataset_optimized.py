@@ -377,8 +377,15 @@ class LazyLoadVQADataset(Dataset):
         if idx in self._encoded_cache:
             question_encoding, answer_encoding = self._encoded_cache[idx]
         else:
-            question = item[self.question_field]
-            answer = item[self.answer_field]
+            question = item.get(self.question_field, "")
+            if not isinstance(question, str):
+                question = str(question) if question is not None else ""
+            question = question.strip() or "What is in the image?"
+            
+            answer = item.get(self.answer_field, "")
+            if not isinstance(answer, str):
+                answer = str(answer) if answer is not None else ""
+            answer = answer.strip() or "unknown"
             
             question_encoding = self.tokenizer(
                 question,
@@ -395,13 +402,56 @@ class LazyLoadVQADataset(Dataset):
                 truncation=True,
                 return_tensors='pt'
             )
+            
+            # 验证和修复token IDs
+            question_encoding = self._validate_and_fix_token_ids(question_encoding, "question")
+            answer_encoding = self._validate_and_fix_token_ids(answer_encoding, "answer")
+            
+            # 创建labels（mask padding tokens）
+            pad_id = self.tokenizer.pad_token_id
+            if pad_id is not None:
+                answer_labels = answer_encoding['input_ids'].clone()
+                answer_labels[answer_labels == pad_id] = -100
+                answer_encoding['labels'] = answer_labels
+            else:
+                answer_encoding['labels'] = answer_encoding['input_ids'].clone()
         
         return {
             'pixel_values': pixel_values,
             'input_ids': question_encoding['input_ids'].squeeze(0),
             'attention_mask': question_encoding['attention_mask'].squeeze(0),
-            'labels': answer_encoding['input_ids'].squeeze(0),
+            'labels': answer_encoding.get('labels', answer_encoding['input_ids']).squeeze(0),
         }
+    
+    def _validate_and_fix_token_ids(self, encoding: Dict[str, torch.Tensor], field_name: str) -> Dict[str, torch.Tensor]:
+        """
+        验证并修复token IDs，确保它们在有效范围内
+        
+        Args:
+            encoding: tokenizer返回的编码字典
+            field_name: 字段名称（用于日志）
+            
+        Returns:
+            修复后的编码字典
+        """
+        input_ids = encoding['input_ids']
+        vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
+        
+        if vocab_size is not None:
+            max_token_id = input_ids.max().item()
+            if max_token_id >= vocab_size:
+                logger.warning(
+                    f"发现超出词汇表大小的token ID ({field_name}): {max_token_id} >= {vocab_size}"
+                )
+                # 将超出范围的token替换为unk_token_id或pad_token_id
+                unk_id = getattr(self.tokenizer, 'unk_token_id', None) or self.tokenizer.pad_token_id or 0
+                input_ids = torch.clamp(input_ids, 0, vocab_size - 1)
+                # 如果clamp后还有问题，用unk_id替换
+                if input_ids.max().item() >= vocab_size:
+                    input_ids[input_ids >= vocab_size] = unk_id
+                encoding['input_ids'] = input_ids
+        
+        return encoding
     
     def clear_cache(self):
         """清空所有缓存"""
@@ -536,8 +586,15 @@ class StreamingVQADataset(IterableDataset):
                     pixel_values = transform(image)
                 
                 # 处理文本
-                question = item[self.question_field]
-                answer = item[self.answer_field]
+                question = item.get(self.question_field, "")
+                if not isinstance(question, str):
+                    question = str(question) if question is not None else ""
+                question = question.strip() or "What is in the image?"
+                
+                answer = item.get(self.answer_field, "")
+                if not isinstance(answer, str):
+                    answer = str(answer) if answer is not None else ""
+                answer = answer.strip() or "unknown"
                 
                 question_encoding = self.tokenizer(
                     question,
@@ -555,11 +612,24 @@ class StreamingVQADataset(IterableDataset):
                     return_tensors='pt'
                 )
                 
+                # 验证和修复token IDs
+                question_encoding = self._validate_and_fix_token_ids(question_encoding, "question")
+                answer_encoding = self._validate_and_fix_token_ids(answer_encoding, "answer")
+                
+                # 创建labels（mask padding tokens）
+                pad_id = self.tokenizer.pad_token_id
+                if pad_id is not None:
+                    answer_labels = answer_encoding['input_ids'].clone()
+                    answer_labels[answer_labels == pad_id] = -100
+                    answer_encoding['labels'] = answer_labels
+                else:
+                    answer_encoding['labels'] = answer_encoding['input_ids'].clone()
+                
                 yield {
                     'pixel_values': pixel_values,
                     'input_ids': question_encoding['input_ids'].squeeze(0),
                     'attention_mask': question_encoding['attention_mask'].squeeze(0),
-                    'labels': answer_encoding['input_ids'].squeeze(0),
+                    'labels': answer_encoding.get('labels', answer_encoding['input_ids']).squeeze(0),
                 }
             
             except Exception as e:
@@ -567,6 +637,36 @@ class StreamingVQADataset(IterableDataset):
                     raise
                 logger.warning(f"跳过错误样本: {e}")
                 continue
+    
+    def _validate_and_fix_token_ids(self, encoding: Dict[str, torch.Tensor], field_name: str) -> Dict[str, torch.Tensor]:
+        """
+        验证并修复token IDs，确保它们在有效范围内
+        
+        Args:
+            encoding: tokenizer返回的编码字典
+            field_name: 字段名称（用于日志）
+            
+        Returns:
+            修复后的编码字典
+        """
+        input_ids = encoding['input_ids']
+        vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
+        
+        if vocab_size is not None:
+            max_token_id = input_ids.max().item()
+            if max_token_id >= vocab_size:
+                logger.warning(
+                    f"发现超出词汇表大小的token ID ({field_name}): {max_token_id} >= {vocab_size}"
+                )
+                # 将超出范围的token替换为unk_token_id或pad_token_id
+                unk_id = getattr(self.tokenizer, 'unk_token_id', None) or self.tokenizer.pad_token_id or 0
+                input_ids = torch.clamp(input_ids, 0, vocab_size - 1)
+                # 如果clamp后还有问题，用unk_id替换
+                if input_ids.max().item() >= vocab_size:
+                    input_ids[input_ids >= vocab_size] = unk_id
+                encoding['input_ids'] = input_ids
+        
+        return encoding
 
 
 class MemoryMappedVQADataset(Dataset):

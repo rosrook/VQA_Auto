@@ -338,19 +338,54 @@ class VQADataset(Dataset):
         pixel_values = self._process_image(image)
         
         # 3. 处理文本（问题）
-        question = item[self.question_field]
+        question = item.get(self.question_field, "")
+        if not isinstance(question, str):
+            question = str(question) if question is not None else ""
+        question = question.strip()
+        if not question:
+            logger.warning(f"样本 {idx} 的问题为空，使用默认问题")
+            question = "What is in the image?"
+        
         question_encoding = self._tokenize(question)
         
         # 4. 处理答案
-        answer = item[self.answer_field]
+        answer = item.get(self.answer_field, "")
+        if not isinstance(answer, str):
+            answer = str(answer) if answer is not None else ""
+        answer = answer.strip()
+        if not answer:
+            logger.warning(f"样本 {idx} 的答案为空，使用默认答案")
+            answer = "unknown"
+        
         answer_encoding = self._tokenize(answer, mask_labels=True)
         
-        result = {
-            'pixel_values': pixel_values,
-            'input_ids': question_encoding['input_ids'].squeeze(0),
-            'attention_mask': question_encoding['attention_mask'].squeeze(0),
-            'labels': answer_encoding['input_ids'].squeeze(0),
-        }
+        # 验证tensor shapes
+        try:
+            result = {
+                'pixel_values': pixel_values,
+                'input_ids': question_encoding['input_ids'].squeeze(0),
+                'attention_mask': question_encoding['attention_mask'].squeeze(0),
+                'labels': answer_encoding.get('labels', answer_encoding['input_ids']).squeeze(0),
+            }
+            
+            # 最终验证：确保所有tensor的shape正确
+            if result['input_ids'].dim() != 1:
+                raise ValueError(f"input_ids维度错误: {result['input_ids'].shape}, 期望1D")
+            if result['labels'].dim() != 1:
+                raise ValueError(f"labels维度错误: {result['labels'].shape}, 期望1D")
+            if result['input_ids'].size(0) != result['labels'].size(0):
+                raise ValueError(f"input_ids和labels长度不匹配: {result['input_ids'].size(0)} vs {result['labels'].size(0)}")
+            
+            # 验证token IDs范围
+            self._validate_batch_item(result, idx)
+            
+        except Exception as e:
+            logger.error(f"样本 {idx} 处理失败: {e}")
+            logger.error(f"  question: {question[:50]}...")
+            logger.error(f"  answer: {answer[:50]}...")
+            logger.error(f"  question_encoding keys: {list(question_encoding.keys())}")
+            logger.error(f"  answer_encoding keys: {list(answer_encoding.keys())}")
+            raise
         
         # 可选：返回原始图像和文本
         if self.return_raw_image:
@@ -394,7 +429,23 @@ class VQADataset(Dataset):
             return torch.from_numpy(torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes())).float())
 
     def _tokenize(self, text: str, mask_labels: bool = False) -> Dict[str, torch.Tensor]:
-        """统一的文本tokenize，并可选地对padding部分mask为-100"""
+        """
+        统一的文本tokenize，并可选地对padding部分mask为-100
+        
+        Args:
+            text: 要tokenize的文本
+            mask_labels: 是否将padding token mask为-100（用于labels）
+            
+        Returns:
+            包含input_ids、attention_mask和labels的字典
+        """
+        # 验证输入
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
+        text = text.strip()
+        if not text:
+            text = " "  # 空文本用空格代替，避免tokenize失败
+        
         encoding = self.tokenizer(
             text,
             max_length=self.max_length,
@@ -402,14 +453,77 @@ class VQADataset(Dataset):
             truncation=True,
             return_tensors='pt'
         )
+        
+        input_ids = encoding['input_ids']
+        
+        # 验证token IDs是否在有效范围内
+        vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
+        if vocab_size is not None:
+            max_token_id = input_ids.max().item()
+            if max_token_id >= vocab_size:
+                logger.warning(
+                    f"发现超出词汇表大小的token ID: {max_token_id} >= {vocab_size}, "
+                    f"文本: {text[:50]}..."
+                )
+                # 将超出范围的token替换为unk_token_id或pad_token_id
+                unk_id = getattr(self.tokenizer, 'unk_token_id', None) or self.tokenizer.pad_token_id or 0
+                input_ids = torch.clamp(input_ids, 0, vocab_size - 1)
+                # 如果clamp后还有问题，用unk_id替换
+                if input_ids.max().item() >= vocab_size:
+                    input_ids[input_ids >= vocab_size] = unk_id
+                encoding['input_ids'] = input_ids
+        
         if mask_labels:
-            input_ids = encoding['input_ids']
+            # 创建labels（将padding token mask为-100）
             pad_id = self.tokenizer.pad_token_id
             if pad_id is not None:
                 labels = input_ids.clone()
                 labels[labels == pad_id] = -100
-                encoding['input_ids'] = labels
+                encoding['labels'] = labels
+            else:
+                # 如果没有pad_token_id，直接使用input_ids作为labels
+                encoding['labels'] = input_ids.clone()
+        else:
+            # 即使不mask，也返回labels（用于某些模型）
+            encoding['labels'] = input_ids.clone()
+        
         return encoding
+    
+    def _validate_batch_item(self, item: Dict[str, torch.Tensor], idx: int):
+        """
+        验证batch item的tensor shapes和值范围
+        
+        Args:
+            item: 包含pixel_values, input_ids, labels等的字典
+            idx: 样本索引（用于错误报告）
+        """
+        # 验证input_ids
+        if 'input_ids' in item:
+            input_ids = item['input_ids']
+            vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
+            if vocab_size is not None:
+                max_id = input_ids.max().item()
+                min_id = input_ids.min().item()
+                if max_id >= vocab_size or min_id < 0:
+                    logger.error(
+                        f"样本 {idx} input_ids超出范围: min={min_id}, max={max_id}, vocab_size={vocab_size}"
+                    )
+                    raise ValueError(f"input_ids超出词汇表范围: [{min_id}, {max_id}] vs [0, {vocab_size-1}]")
+        
+        # 验证labels
+        if 'labels' in item:
+            labels = item['labels']
+            # labels可以是-100（masked），也可以是token IDs
+            valid_labels = labels[(labels != -100) & (labels >= 0)]
+            if len(valid_labels) > 0:
+                vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
+                if vocab_size is not None:
+                    max_label = valid_labels.max().item()
+                    if max_label >= vocab_size:
+                        logger.error(
+                            f"样本 {idx} labels超出范围: max={max_label}, vocab_size={vocab_size}"
+                        )
+                        raise ValueError(f"labels超出词汇表范围: max={max_label} >= {vocab_size}")
 
 
 class ImageCaptioningDataset(Dataset):
@@ -558,7 +672,23 @@ class ImageCaptioningDataset(Dataset):
             return torch.from_numpy(torch.ByteTensor(torch.ByteStorage.from_buffer(image.tobytes())).float())
 
     def _tokenize(self, text: str, mask_labels: bool = False) -> Dict[str, torch.Tensor]:
-        """统一的文本tokenize，并可选地对padding部分mask为-100"""
+        """
+        统一的文本tokenize，并可选地对padding部分mask为-100
+        
+        Args:
+            text: 要tokenize的文本
+            mask_labels: 是否将padding token mask为-100（用于labels）
+            
+        Returns:
+            包含input_ids、attention_mask和labels的字典
+        """
+        # 验证输入
+        if not isinstance(text, str):
+            text = str(text) if text is not None else ""
+        text = text.strip()
+        if not text:
+            text = " "  # 空文本用空格代替，避免tokenize失败
+        
         encoding = self.tokenizer(
             text,
             max_length=self.max_length,
@@ -566,13 +696,40 @@ class ImageCaptioningDataset(Dataset):
             truncation=True,
             return_tensors='pt'
         )
+        
+        input_ids = encoding['input_ids']
+        
+        # 验证token IDs是否在有效范围内
+        vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
+        if vocab_size is not None:
+            max_token_id = input_ids.max().item()
+            if max_token_id >= vocab_size:
+                logger.warning(
+                    f"发现超出词汇表大小的token ID: {max_token_id} >= {vocab_size}, "
+                    f"文本: {text[:50]}..."
+                )
+                # 将超出范围的token替换为unk_token_id或pad_token_id
+                unk_id = getattr(self.tokenizer, 'unk_token_id', None) or self.tokenizer.pad_token_id or 0
+                input_ids = torch.clamp(input_ids, 0, vocab_size - 1)
+                # 如果clamp后还有问题，用unk_id替换
+                if input_ids.max().item() >= vocab_size:
+                    input_ids[input_ids >= vocab_size] = unk_id
+                encoding['input_ids'] = input_ids
+        
         if mask_labels:
-            input_ids = encoding['input_ids']
+            # 创建labels（将padding token mask为-100）
             pad_id = self.tokenizer.pad_token_id
             if pad_id is not None:
                 labels = input_ids.clone()
                 labels[labels == pad_id] = -100
-                encoding['input_ids'] = labels
+                encoding['labels'] = labels
+            else:
+                # 如果没有pad_token_id，直接使用input_ids作为labels
+                encoding['labels'] = input_ids.clone()
+        else:
+            # 即使不mask，也返回labels（用于某些模型）
+            encoding['labels'] = input_ids.clone()
+        
         return encoding
 
 
