@@ -5,7 +5,7 @@
 import logging
 import sys
 from pathlib import Path
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, List, Any
 from datetime import datetime
 import json
 

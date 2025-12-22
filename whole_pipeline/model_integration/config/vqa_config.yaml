@@ -13,7 +13,7 @@ experiment_name: null
 # ============ 数据配置 ============
 # 数据路径
 data_paths:
-  train: "data/raw/vqa_train.jsonl"      # 训练数据路径（支持.jsonl, .json, .parquet等）
+  train: "/home/zhuxuzhou/VQA_Auto/whole_pipeline/model_integration/data/preview.jsonl"      # 训练数据路径（支持.jsonl, .json, .parquet等）
   validation: null                        # 验证数据路径（null表示不使用验证集）
   test: null                              # 测试数据路径（null表示不使用测试集）
 
