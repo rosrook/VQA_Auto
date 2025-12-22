@@ -1096,10 +1096,18 @@ def safe_collate_fn(
                         min_valid = valid_tensor.min().item()
                         
                         if max_valid >= vocab_size or min_valid < 0:
-                            logger.warning(
-                                f"⚠️  {key}包含非法值: [{min_valid}, {max_valid}] vs vocab_size={vocab_size}, "
-                                f"修复中..."
-                            )
+                            # 写入调试日志文件，不刷屏
+                            debug_logger = logging.getLogger('debug')
+                            if debug_logger.handlers:
+                                debug_logger.warning(
+                                    f"⚠️  {key}包含非法值: [{min_valid}, {max_valid}] vs vocab_size={vocab_size}, "
+                                    f"修复中..."
+                                )
+                            else:
+                                logger.warning(
+                                    f"⚠️  {key}包含非法值: [{min_valid}, {max_valid}] vs vocab_size={vocab_size}, "
+                                    f"修复中..."
+                                )
                             # 创建mask：非-100且超出范围的值
                             mask = (tensor_cpu != -100) & ((tensor_cpu < 0) | (tensor_cpu >= vocab_size))
                             tensor_cpu[mask] = -100
@@ -1107,14 +1115,25 @@ def safe_collate_fn(
                 else:
                     # input_ids和decoder_input_ids必须在[0, vocab_size-1]范围内
                     if max_val >= vocab_size or min_val < 0:
-                        logger.warning(
-                            f"⚠️  {key}包含非法值: [{min_val}, {max_val}] vs vocab_size={vocab_size}, "
-                            f"修复中..."
-                        )
+                        # 写入调试日志文件，不刷屏
+                        debug_logger = logging.getLogger('debug')
+                        if debug_logger.handlers:
+                            debug_logger.warning(
+                                f"⚠️  {key}包含非法值: [{min_val}, {max_val}] vs vocab_size={vocab_size}, "
+                                f"修复中..."
+                            )
+                        else:
+                            logger.warning(
+                                f"⚠️  {key}包含非法值: [{min_val}, {max_val}] vs vocab_size={vocab_size}, "
+                                f"修复中..."
+                            )
                         # Clamp到有效范围
                         tensor_cpu = torch.clamp(tensor_cpu, 0, vocab_size - 1)
                         collated[key] = tensor_cpu.to(tensor.device) if tensor.is_cuda else tensor_cpu
-                        logger.info(f"   ✅ {key}修复后: min={tensor_cpu.min().item()}, max={tensor_cpu.max().item()}")
+                        # 写入调试日志文件，不刷屏
+                        debug_logger = logging.getLogger('debug')
+                        if debug_logger.handlers:
+                            debug_logger.info(f"   ✅ {key}修复后: min={tensor_cpu.min().item()}, max={tensor_cpu.max().item()}")
     
     return collated
 
