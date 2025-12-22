@@ -266,12 +266,14 @@ class ModelLoader:
                 logger.warning("需要安装bitsandbytes来使用4bit量化: pip install bitsandbytes")
         
         # 加载模型
+        # 注意：不要使用 torch.inference_mode() 或 torch.no_grad()
+        # 这会导致模型无法跟踪梯度，训练时会报错：
+        # RuntimeError: Inference tensors do not track version counter.
         try:
-            with torch.inference_mode():
-                model = model_class.from_pretrained(
-                    self.model_name,
-                    **safe_kwargs
-                )
+            model = model_class.from_pretrained(
+                self.model_name,
+                **safe_kwargs
+            )
             logger.info(f"模型加载成功: {type(model).__name__}")
             return model
         except Exception as e:
