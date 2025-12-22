@@ -1,0 +1,278 @@
+# ============================================================================
+# VQA Pipeline 完整配置文件
+# 整合data、models、training、utils等所有模块的配置
+# ============================================================================
+
+# ============ 基础配置 ============
+# 任务类型: vqa, image_captioning, classification, seq2seq, causal_lm
+task_type: "vqa"
+
+# 实验名称（如果为null，会自动生成带时间戳的名称）
+experiment_name: null
+
+# ============ 数据配置 ============
+# 数据路径
+data_paths:
+  train: "data/raw/vqa_train.jsonl"      # 训练数据路径（支持.jsonl, .json, .parquet等）
+  validation: null                        # 验证数据路径（null表示不使用验证集）
+  test: null                              # 测试数据路径（null表示不使用测试集）
+
+# 数据分割配置
+data_split:
+  auto_split: false                       # 是否自动分割数据集（如果validation/test为null）
+  train_ratio: 0.8                        # 训练集比例（auto_split=true时使用）
+  val_ratio: 0.1                          # 验证集比例（auto_split=true时使用）
+  test_ratio: 0.1                         # 测试集比例（auto_split=true时使用）
+  shuffle: true                           # 是否打乱数据
+  random_seed: 42                         # 随机种子
+  stratify_by: null                       # 分层字段（可选）
+
+# ============ 内存优化配置 ============
+optimization:
+  # 数据加载策略: auto, standard, lazy, streaming, memmap
+  strategy: "auto"
+  
+  # 图像缓存设置
+  cache_images: true                      # 是否缓存加载的图像
+  cache_size: 1000                        # 最多缓存图像数量
+  preload_images: false                   # 是否预加载所有图像（仅小数据集）
+  
+  # 流式加载设置（当strategy='streaming'时）
+  use_streaming: false
+  skip_errors: true                       # 流式加载时是否跳过错误样本
+  
+  # 内存映射设置（当strategy='memmap'时）
+  memmap_dir: "data/memmap"               # 内存映射数据目录
+  
+  # 数据加载优化
+  pin_memory: true                        # 固定内存（GPU训练时推荐）
+  prefetch_factor: 2                      # 预取批次数
+  persistent_workers: true               # 保持worker进程（加速但占内存）
+
+# ============ 图像配置 ============
+image:
+  root_dir: "data/images"                 # 图像根目录（如果image字段是相对路径）
+  load_on_fly: true                       # 动态加载（不预加载）
+  
+  # 图像处理优化
+  resize_before_transform: true           # 先resize再transform（减少内存）
+  use_cache: true                         # 使用图像缓存
+  
+  # 图像格式
+  supported_formats: ['.jpg', '.jpeg', '.png', '.bmp']
+
+# ============ VQA任务配置 ============
+vqa:
+  data_fields:
+    image_field: "image"                   # JSONL中的图像字段名
+    question_field: "question"             # JSONL中的问题字段名
+    answer_field: "answer"                 # JSONL中的答案字段名
+  max_question_length: 128                # 最大问题长度
+  max_answer_length: 32                    # 最大答案长度
+
+# ============ Tokenizer配置 ============
+tokenizer:
+  name: "Salesforce/blip-vqa-base"        # HuggingFace模型ID或本地路径
+  type: "blip"                             # processor类型: blip, clip, auto（可选，会自动检测）
+  max_length: 128                         # 最大序列长度
+  padding: "max_length"                    # padding方式: max_length, longest
+  truncation: true                         # 是否截断
+
+# ============ 图像Processor配置 ============
+image_processor:
+  name: "Salesforce/blip-vqa-base"        # HuggingFace模型ID或本地路径
+  type: "blip"                             # processor类型: blip, clip, auto（可选，会自动检测）
+  size: 384                                # 图像尺寸（BLIP-base默认384x384）
+
+# ============ DataLoader配置 ============
+dataloader:
+  batch_size: 16                           # 批次大小
+  shuffle: true                            # 是否打乱（训练集）
+  num_workers: 4                           # 数据加载进程数
+  pin_memory: true                         # 固定内存
+  drop_last: false                         # 是否丢弃最后一个不完整的batch
+  prefetch_factor: 2                       # 预取批次数
+
+# ============ 模型配置 ============
+model:
+  name: "Salesforce/blip-vqa-base"        # HuggingFace模型ID或本地路径
+  type: "blip"                             # 模型类型: blip, auto（可选，会自动检测）
+  task: "vqa"                              # 任务类型: vqa, image_text_retrieval, conditional_generation
+  
+  # 模型加载参数
+  device: null                             # 设备: cuda, cpu, null=auto
+  torch_dtype: null                        # 数据类型: float32, float16, bfloat16, null=auto
+  device_map: null                         # 设备映射: auto, cuda:0, null=auto
+  load_in_8bit: false                      # 是否8bit量化（需要bitsandbytes）
+  load_in_4bit: false                      # 是否4bit量化（需要bitsandbytes）
+  trust_remote_code: true                  # 是否信任远程代码
+  low_cpu_mem_usage: true                  # 是否低CPU内存使用
+
+# ============ 训练配置 ============
+training:
+  # 基础训练参数
+  num_epochs: 5                            # 训练轮数
+  fp16: true                               # 是否使用混合精度训练（FP16）
+  gradient_accumulation_steps: 2           # 梯度累积步数
+  max_grad_norm: 1.0                       # 梯度裁剪阈值（null表示不裁剪）
+  
+  # 检查点配置
+  checkpoint_dir: "checkpoints"            # 检查点保存目录
+  max_checkpoints: 5                       # 最多保存的检查点数量
+  save_best_only: true                     # 是否只保存最佳模型
+  checkpoint_monitor: "val_loss"           # 监控的指标（用于判断最佳模型）
+  
+  # 优化器配置
+  optimizer:
+    type: "adamw"                          # 优化器类型: adamw, adam, sgd
+    lr: 3e-5                               # 学习率
+    weight_decay: 0.01                     # 权重衰减
+    betas: [0.9, 0.999]                    # Adam/AdamW的beta参数（可选）
+    eps: 1e-8                              # 优化器的epsilon参数（可选）
+  
+  # 学习率调度器配置
+  scheduler:
+    type: "cosine"                         # 调度器类型: cosine, step, reduce_on_plateau, null=不使用
+    # CosineAnnealingLR参数
+    T_max: null                            # 最大迭代数（null表示使用num_epochs）
+    eta_min: 0.0                           # 最小学习率
+    # StepLR参数
+    step_size: 1                           # 学习率衰减步长
+    gamma: 0.1                             # 学习率衰减系数
+    # ReduceLROnPlateau参数
+    factor: 0.5                            # 学习率衰减因子
+    patience: 2                            # 容忍多少个epoch没有改善
+    mode: "min"                            # min或max
+  
+  # 早停配置
+  early_stopping:
+    enabled: true                          # 是否启用早停
+    monitor: "val_loss"                    # 监控的指标
+    patience: 3                            # 容忍多少个epoch没有改善
+    min_delta: 0.001                       # 最小改善幅度
+    mode: "min"                            # min或max
+    restore_best_weights: true             # 是否恢复最佳权重
+  
+  # 冻结层配置
+  freeze:
+    enabled: true                          # 是否冻结部分层
+    layers: ["vision_model"]               # 要冻结的层名称列表（空列表表示冻结所有层）
+  
+  # TensorBoard配置
+  use_tensorboard: true                    # 是否使用TensorBoard记录日志
+  
+  # 其他训练参数
+  eval_strategy: "epoch"                   # 评估策略: epoch, steps
+  eval_steps: null                         # 评估步数（eval_strategy=steps时使用）
+  save_strategy: "epoch"                   # 保存策略: epoch, steps
+  save_steps: null                         # 保存步数（save_strategy=steps时使用）
+
+# ============ 评估配置 ============
+evaluation:
+  # 评估指标
+  metrics:
+    - "loss"                               # 损失
+    - "accuracy"                           # 准确率
+    - "exact_match"                        # 完全匹配率
+    - "f1"                                 # F1分数
+  
+  # VQA专用评估参数
+  vqa:
+    max_length: 20                         # 生成答案的最大长度
+    num_beams: 3                           # beam search数量
+    temperature: 1.0                       # 采样温度
+    top_p: 1.0                             # nucleus采样参数
+
+# ============ 数据预处理配置 ============
+preprocessing:
+  # 批量预处理
+  batch_preprocess: true                   # 是否批量预处理
+  batch_size: 1000                         # 批处理大小
+  
+  # 并行处理
+  num_proc: 4                              # 并行处理进程数
+  
+  # 缓存预处理结果
+  cache_processed: true                    # 是否缓存预处理结果
+  cache_dir: "data/cache"                  # 缓存目录
+  
+  # Processor配置（用于数据预处理）
+  processor:
+    processor_type: null                   # processor类型（null表示自动检测）
+    processor_name: null                   # processor名称（null表示使用model配置）
+
+# ============ 日志配置 ============
+logging:
+  level: "INFO"                            # 日志级别: DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_dir: "logs"                          # 日志目录
+  log_statistics: true                     # 是否记录统计信息
+  log_memory_usage: true                   # 是否记录内存使用
+  log_interval: 50                         # 每N步记录一次日志
+  file_logging: true                       # 是否保存日志到文件
+  console_logging: true                    # 是否输出日志到控制台
+
+# ============ 推理配置 ============
+inference:
+  # 生成参数
+  max_length: 20                          # 最大生成长度
+  num_beams: 3                             # beam search数量
+  temperature: 1.0                         # 采样温度
+  top_p: 1.0                               # nucleus采样参数
+  top_k: 50                                # top-k采样参数
+  do_sample: false                         # 是否使用采样
+  repetition_penalty: 1.0                  # 重复惩罚
+
+# ============ 不同数据集大小的推荐配置 ============
+# 小数据集 (<10k samples, <5GB)
+# optimization:
+#   strategy: "standard"
+#   cache_images: true
+#   preload_images: true
+# dataloader:
+#   batch_size: 32
+#   num_workers: 4
+# training:
+#   gradient_accumulation_steps: 1
+#   fp16: false
+
+# 中等数据集 (10k-100k samples, 5-50GB)
+# optimization:
+#   strategy: "lazy"
+#   cache_images: true
+#   cache_size: 2000
+#   preload_images: false
+# dataloader:
+#   batch_size: 16
+#   num_workers: 4
+#   persistent_workers: true
+# training:
+#   gradient_accumulation_steps: 2
+#   fp16: true
+
+# 大数据集 (>100k samples, >50GB)
+# optimization:
+#   strategy: "streaming"
+#   use_streaming: true
+#   cache_images: false
+# dataloader:
+#   batch_size: 8
+#   num_workers: 2
+# training:
+#   gradient_accumulation_steps: 8
+#   fp16: true
+#   max_grad_norm: 1.0
+
+# 超大数据集 (>1M samples)
+# 1. 先预处理为memmap格式:
+#    python scripts/preprocess_to_memmap.py
+# 2. 使用memmap加载:
+# optimization:
+#   strategy: "memmap"
+#   memmap_dir: "data/memmap"
+# dataloader:
+#   batch_size: 16
+#   num_workers: 2
+# training:
+#   gradient_accumulation_steps: 4
+#   fp16: true
+

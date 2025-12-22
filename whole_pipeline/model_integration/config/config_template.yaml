@@ -1,0 +1,59 @@
+# ============================================================================
+# VQA Pipeline 配置文件模板
+# 复制此文件并根据需要修改配置
+# ============================================================================
+
+# ============ 基础配置 ============
+task_type: "vqa"                          # 任务类型
+experiment_name: null                      # 实验名称（null=自动生成）
+
+# ============ 数据配置 ============
+data_paths:
+  train: "data/train.jsonl"               # 训练数据路径
+  validation: null                         # 验证数据路径
+  test: null                               # 测试数据路径
+
+data_split:
+  auto_split: false                        # 是否自动分割
+  train_ratio: 0.8
+  val_ratio: 0.1
+  test_ratio: 0.1
+
+# ============ 模型配置 ============
+model:
+  name: "Salesforce/blip-vqa-base"        # 模型名称
+  type: "blip"                             # 模型类型
+  task: "vqa"                              # 任务类型
+
+tokenizer:
+  name: "Salesforce/blip-vqa-base"
+  type: "blip"
+  max_length: 128
+
+image_processor:
+  name: "Salesforce/blip-vqa-base"
+  type: "blip"
+  size: 384
+
+# ============ 训练配置 ============
+training:
+  num_epochs: 5
+  fp16: true
+  gradient_accumulation_steps: 2
+  
+  optimizer:
+    type: "adamw"
+    lr: 3e-5
+    weight_decay: 0.01
+  
+  scheduler:
+    type: "cosine"
+  
+  early_stopping:
+    enabled: true
+    monitor: "val_loss"
+    patience: 3
+
+# ============ 其他配置 ============
+# 参考 vqa_config.yaml 获取完整配置选项
+
