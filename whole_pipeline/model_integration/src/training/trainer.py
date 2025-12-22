@@ -984,8 +984,9 @@ class Trainer:
         if is_blip and 'decoder_input_ids' not in batch and 'labels' in batch:
             labels = batch['labels']
             if isinstance(labels, torch.Tensor):
-                # BLIP模型通常需要decoder_input_ids，从labels创建
-                # decoder_input_ids是labels向右shift一位，第一个token是bos_token_id
+                # BLIP模型通常需要decoder_input_ids
+                # 重要：decoder_input_ids不应该包含-100（mask值）
+                # 应该从labels中过滤掉-100，然后创建decoder_input_ids
                 try:
                     bos_token_id = getattr(self.model.config, 'bos_token_id', None)
                     if bos_token_id is None:
@@ -994,14 +995,24 @@ class Trainer:
                         bos_token_id = 0  # 默认值
                     
                     # 创建decoder_input_ids: [bos_token_id, label[0], label[1], ..., label[n-1]]
+                    # 但需要处理-100（mask值）
                     decoder_input_ids = labels.clone()
+                    
+                    # 将-100替换为pad_token_id（用于decoder_input_ids）
+                    pad_token_id = getattr(self.model.config, 'pad_token_id', 0)
+                    mask_token = -100
+                    decoder_input_ids[decoder_input_ids == mask_token] = pad_token_id
+                    
                     # 将第一个位置设置为bos_token_id，其余位置shift
-                    decoder_input_ids[:, 1:] = labels[:, :-1]
+                    decoder_input_ids[:, 1:] = decoder_input_ids[:, :-1]
                     decoder_input_ids[:, 0] = bos_token_id
                     
                     batch['decoder_input_ids'] = decoder_input_ids
                     if batch_idx == 0:
-                        debug_logger.info(f"   ✅ 为BLIP模型创建了decoder_input_ids (bos_token_id={bos_token_id})")
+                        debug_logger.info(f"   ✅ 为BLIP模型创建了decoder_input_ids (bos_token_id={bos_token_id}, pad_token_id={pad_token_id})")
+                        # 检查是否还有-100
+                        if (decoder_input_ids == mask_token).any():
+                            debug_logger.warning(f"   ⚠️ decoder_input_ids中仍有-100，这不应该发生")
                 except Exception as e:
                     if batch_idx == 0:
                         debug_logger.warning(f"   无法创建decoder_input_ids: {e}")
@@ -1063,15 +1074,27 @@ class Trainer:
                                         if len(invalid_values) <= 20:
                                             debug_logger.error(f"   被修复的值列表: {invalid_values.tolist()}")
                                 
-                                # 修复：使用unk_token_id而不是clamp（更合理）
+                                # 修复：使用unk_token_id或pad_token_id
                                 unk_token_id = getattr(self.model.config, 'unk_token_id', None)
-                                if unk_token_id is None:
-                                    unk_token_id = getattr(self.model.config, 'pad_token_id', 0)
+                                pad_token_id = getattr(self.model.config, 'pad_token_id', 0)
                                 
-                                # 对于超出上限的值，使用unk_token_id
-                                # 对于负值，clamp到0
-                                tensor_cpu[invalid_mask & (tensor_cpu >= effective_vocab_size)] = unk_token_id
-                                tensor_cpu[invalid_mask & (tensor_cpu < 0)] = 0
+                                # 对于decoder_input_ids，不应该包含-100，应该使用pad_token_id
+                                if 'decoder' in key.lower():
+                                    # decoder_input_ids不应该包含-100或负值
+                                    # 将-100和负值替换为pad_token_id
+                                    negative_mask = tensor_cpu < 0
+                                    if negative_mask.any():
+                                        tensor_cpu[negative_mask] = pad_token_id
+                                        if batch_idx == 0:
+                                            debug_logger.warning(f"   ⚠️ {key}中包含负值，已替换为pad_token_id={pad_token_id}")
+                                
+                                # 对于超出上限的值，使用unk_token_id（如果可用）或pad_token_id
+                                replacement_id = unk_token_id if unk_token_id is not None else pad_token_id
+                                tensor_cpu[invalid_mask & (tensor_cpu >= effective_vocab_size)] = replacement_id
+                                
+                                # 对于负值（除了decoder_input_ids已处理），clamp到0
+                                if 'decoder' not in key.lower():
+                                    tensor_cpu[invalid_mask & (tensor_cpu < 0)] = 0
                                 
                                 batch[key] = tensor_cpu.to(tensor.device)
                                 if batch_idx == 0:
