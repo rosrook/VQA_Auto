@@ -988,34 +988,69 @@ class Trainer:
                 # 重要：decoder_input_ids不应该包含-100（mask值）
                 # 应该从labels中过滤掉-100，然后创建decoder_input_ids
                 try:
+                    # 确保在CPU上操作（避免设备问题）
+                    labels_cpu = labels.cpu() if labels.is_cuda else labels.clone()
+                    
+                    # 获取token IDs（确保不是None）
                     bos_token_id = getattr(self.model.config, 'bos_token_id', None)
                     if bos_token_id is None:
                         bos_token_id = getattr(self.model.config, 'decoder_start_token_id', None)
                     if bos_token_id is None:
-                        bos_token_id = 0  # 默认值
+                        # 尝试从tokenizer获取
+                        if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
+                            bos_token_id = getattr(self.model.tokenizer, 'bos_token_id', None)
+                        if bos_token_id is None:
+                            bos_token_id = 0  # 默认值
+                    
+                    # 获取pad_token_id（确保不是None）
+                    pad_token_id = getattr(self.model.config, 'pad_token_id', None)
+                    if pad_token_id is None:
+                        # 尝试从tokenizer获取
+                        if hasattr(self.model, 'tokenizer') and self.model.tokenizer is not None:
+                            pad_token_id = getattr(self.model.tokenizer, 'pad_token_id', None)
+                        if pad_token_id is None:
+                            pad_token_id = 0  # 默认值
+                    
+                    # 确保是整数类型（不能是None）
+                    bos_token_id = int(bos_token_id) if bos_token_id is not None else 0
+                    pad_token_id = int(pad_token_id) if pad_token_id is not None else 0
+                    
+                    if batch_idx == 0:
+                        debug_logger.info(f"   🔍 创建decoder_input_ids: bos_token_id={bos_token_id}, pad_token_id={pad_token_id}")
                     
                     # 创建decoder_input_ids: [bos_token_id, label[0], label[1], ..., label[n-1]]
                     # 但需要处理-100（mask值）
-                    decoder_input_ids = labels.clone()
+                    # 确保在CPU上操作
+                    decoder_input_ids = labels_cpu.clone()
                     
                     # 将-100替换为pad_token_id（用于decoder_input_ids）
-                    pad_token_id = getattr(self.model.config, 'pad_token_id', 0)
                     mask_token = -100
                     decoder_input_ids[decoder_input_ids == mask_token] = pad_token_id
                     
                     # 将第一个位置设置为bos_token_id，其余位置shift
-                    decoder_input_ids[:, 1:] = decoder_input_ids[:, :-1]
+                    decoder_input_ids[:, 1:] = decoder_input_ids[:, :-1].clone()
                     decoder_input_ids[:, 0] = bos_token_id
+                    
+                    # 移回原始设备
+                    if labels.is_cuda:
+                        decoder_input_ids = decoder_input_ids.to(labels.device)
                     
                     batch['decoder_input_ids'] = decoder_input_ids
                     if batch_idx == 0:
                         debug_logger.info(f"   ✅ 为BLIP模型创建了decoder_input_ids (bos_token_id={bos_token_id}, pad_token_id={pad_token_id})")
-                        # 检查是否还有-100
-                        if (decoder_input_ids == mask_token).any():
+                        # 验证decoder_input_ids
+                        decoder_cpu_check = decoder_input_ids.cpu() if decoder_input_ids.is_cuda else decoder_input_ids
+                        if (decoder_cpu_check == mask_token).any():
                             debug_logger.warning(f"   ⚠️ decoder_input_ids中仍有-100，这不应该发生")
+                        if decoder_cpu_check.min() < 0:
+                            debug_logger.warning(f"   ⚠️ decoder_input_ids中包含负值: {decoder_cpu_check.min().item()}")
                 except Exception as e:
                     if batch_idx == 0:
-                        debug_logger.warning(f"   无法创建decoder_input_ids: {e}")
+                        debug_logger.error(f"   ❌ 无法创建decoder_input_ids: {e}")
+                        import traceback
+                        debug_logger.error(f"   详细错误: {traceback.format_exc()}")
+                    # 如果创建失败，不添加decoder_input_ids，让模型自己处理
+                    pass
         
         if not effective_vocab_size:
             if batch_idx == 0:
