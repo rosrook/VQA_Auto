@@ -13,9 +13,21 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
-    BlipForQuestionAnswering,
-    BlipProcessor
+    AutoModelForConditionalGeneration,
+    AutoProcessor,
 )
+
+# 安全导入BLIP相关类（如果不存在则使用Auto类）
+try:
+    from transformers import BlipForQuestionAnswering, BlipProcessor
+except ImportError:
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "无法导入 BLIP 相关类，将使用 AutoModel/AutoProcessor 作为回退。"
+        "如果需要使用 BLIP 模型，请升级 transformers 版本（>=4.30.0）"
+    )
+    BlipForQuestionAnswering = AutoModelForConditionalGeneration
+    BlipProcessor = AutoProcessor
 
 logger = logging.getLogger(__name__)
 

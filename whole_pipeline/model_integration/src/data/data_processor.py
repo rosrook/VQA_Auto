@@ -14,15 +14,36 @@ from transformers import (
     AutoProcessor,
     AutoImageProcessor,
     AutoTokenizer,
-    BlipProcessor,
-    BlipImageProcessor,
-    BlipTokenizer,
-    CLIPProcessor,
-    CLIPImageProcessor,
-    CLIPTokenizer
 )
 
+# 安全导入特定processor类（如果不存在则使用Auto类）
+try:
+    from transformers import BlipProcessor, BlipImageProcessor, BlipTokenizer
+except ImportError:
+    BlipProcessor = AutoProcessor
+    BlipImageProcessor = AutoImageProcessor
+    BlipTokenizer = AutoTokenizer
+
+try:
+    from transformers import CLIPProcessor, CLIPImageProcessor, CLIPTokenizer
+except ImportError:
+    CLIPProcessor = AutoProcessor
+    CLIPImageProcessor = AutoImageProcessor
+    CLIPTokenizer = AutoTokenizer
+
 logger = logging.getLogger(__name__)
+
+# 在logger创建后记录警告信息
+if BlipProcessor == AutoProcessor:
+    logger.warning(
+        "无法导入 BlipProcessor/BlipImageProcessor/BlipTokenizer，"
+        "将使用 AutoProcessor/AutoImageProcessor/AutoTokenizer 作为回退"
+    )
+if CLIPProcessor == AutoProcessor:
+    logger.warning(
+        "无法导入 CLIPProcessor/CLIPImageProcessor/CLIPTokenizer，"
+        "将使用 AutoProcessor/AutoImageProcessor/AutoTokenizer 作为回退"
+    )
 
 
 class DataProcessor:

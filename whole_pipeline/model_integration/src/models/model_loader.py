@@ -9,14 +9,31 @@ from pathlib import Path
 from transformers import (
     AutoModelForConditionalGeneration,
     AutoModel,
-    BlipForQuestionAnswering,
-    BlipForImageTextRetrieval,
-    BlipForConditionalGeneration,
-    BlipProcessor,
+    AutoProcessor,
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast
 )
+
+# 安全导入BLIP相关类（如果不存在则使用Auto类）
+try:
+    from transformers import (
+        BlipForQuestionAnswering,
+        BlipForImageTextRetrieval,
+        BlipForConditionalGeneration,
+        BlipProcessor,
+    )
+except ImportError:
+    logger = logging.getLogger(__name__)
+    logger.warning(
+        "无法导入 BLIP 相关类，将使用 AutoModel/AutoProcessor 作为回退。"
+        "如果需要使用 BLIP 模型，请升级 transformers 版本（>=4.30.0）"
+    )
+    # 使用 Auto 类作为回退
+    BlipForQuestionAnswering = AutoModelForConditionalGeneration
+    BlipForImageTextRetrieval = AutoModel
+    BlipForConditionalGeneration = AutoModelForConditionalGeneration
+    BlipProcessor = AutoProcessor
 
 logger = logging.getLogger(__name__)
 

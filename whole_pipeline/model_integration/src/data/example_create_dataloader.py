@@ -12,7 +12,13 @@ from data_pipeline import DataPipeline
 from data_loader import DataLoader
 from data_processor import DataProcessor
 from dataset import VQADataset, create_dataloader
-from transformers import BlipProcessor
+
+# 安全导入BlipProcessor（如果不存在则使用AutoProcessor）
+try:
+    from transformers import BlipProcessor
+except ImportError:
+    from transformers import AutoProcessor as BlipProcessor
+    print("警告: 无法导入 BlipProcessor，使用 AutoProcessor 作为回退")
 
 
 def method1_using_pipeline(config_path: str):
