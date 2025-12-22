@@ -455,6 +455,7 @@ class VQADataset(Dataset):
         )
         
         input_ids = encoding['input_ids']
+        attention_mask = encoding.get('attention_mask', None)
         
         # 验证token IDs是否在有效范围内
         vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
@@ -472,6 +473,40 @@ class VQADataset(Dataset):
                 if input_ids.max().item() >= vocab_size:
                     input_ids[input_ids >= vocab_size] = unk_id
                 encoding['input_ids'] = input_ids
+        
+        # 确保attention_mask存在且正确
+        if attention_mask is None:
+            # 如果没有attention_mask，根据input_ids创建
+            pad_id = self.tokenizer.pad_token_id
+            if pad_id is not None:
+                attention_mask = (input_ids != pad_id).long()
+            else:
+                # 如果没有pad_token_id，假设所有非0位置都是有效token
+                attention_mask = (input_ids != 0).long()
+            encoding['attention_mask'] = attention_mask
+        else:
+            # 验证attention_mask shape
+            if attention_mask.shape != input_ids.shape:
+                logger.warning(
+                    f"attention_mask shape {attention_mask.shape} 与 input_ids shape {input_ids.shape} 不匹配，"
+                    f"重新创建attention_mask"
+                )
+                pad_id = self.tokenizer.pad_token_id
+                if pad_id is not None:
+                    attention_mask = (input_ids != pad_id).long()
+                else:
+                    attention_mask = (input_ids != 0).long()
+                encoding['attention_mask'] = attention_mask
+            
+            # 确保attention_mask值是0或1
+            unique_values = torch.unique(attention_mask)
+            invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+            if len(invalid_values) > 0:
+                logger.warning(
+                    f"attention_mask包含非法值: {invalid_values.tolist()}，clamp到[0, 1]"
+                )
+                attention_mask = torch.clamp(attention_mask, 0, 1).long()
+                encoding['attention_mask'] = attention_mask
         
         if mask_labels:
             # 创建labels（将padding token mask为-100）
@@ -500,6 +535,10 @@ class VQADataset(Dataset):
         # 验证input_ids
         if 'input_ids' in item:
             input_ids = item['input_ids']
+            # 确保是1D tensor（单个样本）
+            if input_ids.dim() != 1:
+                raise ValueError(f"样本 {idx} input_ids应该是1D tensor，得到shape {input_ids.shape}")
+            
             vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
             if vocab_size is not None:
                 max_id = input_ids.max().item()
@@ -510,9 +549,44 @@ class VQADataset(Dataset):
                     )
                     raise ValueError(f"input_ids超出词汇表范围: [{min_id}, {max_id}] vs [0, {vocab_size-1}]")
         
+        # 验证attention_mask
+        if 'attention_mask' in item:
+            attention_mask = item['attention_mask']
+            if attention_mask.dim() != 1:
+                raise ValueError(f"样本 {idx} attention_mask应该是1D tensor，得到shape {attention_mask.shape}")
+            
+            # 确保attention_mask长度与input_ids匹配
+            if 'input_ids' in item:
+                if attention_mask.size(0) != item['input_ids'].size(0):
+                    raise ValueError(
+                        f"样本 {idx} attention_mask长度 {attention_mask.size(0)} 与 "
+                        f"input_ids长度 {item['input_ids'].size(0)} 不匹配"
+                    )
+            
+            # 验证attention_mask值（应该是0或1）
+            unique_values = torch.unique(attention_mask)
+            invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+            if len(invalid_values) > 0:
+                logger.warning(
+                    f"样本 {idx} attention_mask包含非法值: {invalid_values.tolist()}，"
+                    f"将clamp到[0, 1]范围"
+                )
+                item['attention_mask'] = torch.clamp(attention_mask, 0, 1).long()
+        
         # 验证labels
         if 'labels' in item:
             labels = item['labels']
+            if labels.dim() != 1:
+                raise ValueError(f"样本 {idx} labels应该是1D tensor，得到shape {labels.shape}")
+            
+            # 确保labels长度与input_ids匹配
+            if 'input_ids' in item:
+                if labels.size(0) != item['input_ids'].size(0):
+                    raise ValueError(
+                        f"样本 {idx} labels长度 {labels.size(0)} 与 "
+                        f"input_ids长度 {item['input_ids'].size(0)} 不匹配"
+                    )
+            
             # labels可以是-100（masked），也可以是token IDs
             valid_labels = labels[(labels != -100) & (labels >= 0)]
             if len(valid_labels) > 0:
@@ -698,6 +772,7 @@ class ImageCaptioningDataset(Dataset):
         )
         
         input_ids = encoding['input_ids']
+        attention_mask = encoding.get('attention_mask', None)
         
         # 验证token IDs是否在有效范围内
         vocab_size = len(self.tokenizer) if hasattr(self.tokenizer, '__len__') else getattr(self.tokenizer, 'vocab_size', None)
@@ -715,6 +790,40 @@ class ImageCaptioningDataset(Dataset):
                 if input_ids.max().item() >= vocab_size:
                     input_ids[input_ids >= vocab_size] = unk_id
                 encoding['input_ids'] = input_ids
+        
+        # 确保attention_mask存在且正确
+        if attention_mask is None:
+            # 如果没有attention_mask，根据input_ids创建
+            pad_id = self.tokenizer.pad_token_id
+            if pad_id is not None:
+                attention_mask = (input_ids != pad_id).long()
+            else:
+                # 如果没有pad_token_id，假设所有非0位置都是有效token
+                attention_mask = (input_ids != 0).long()
+            encoding['attention_mask'] = attention_mask
+        else:
+            # 验证attention_mask shape
+            if attention_mask.shape != input_ids.shape:
+                logger.warning(
+                    f"attention_mask shape {attention_mask.shape} 与 input_ids shape {input_ids.shape} 不匹配，"
+                    f"重新创建attention_mask"
+                )
+                pad_id = self.tokenizer.pad_token_id
+                if pad_id is not None:
+                    attention_mask = (input_ids != pad_id).long()
+                else:
+                    attention_mask = (input_ids != 0).long()
+                encoding['attention_mask'] = attention_mask
+            
+            # 确保attention_mask值是0或1
+            unique_values = torch.unique(attention_mask)
+            invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+            if len(invalid_values) > 0:
+                logger.warning(
+                    f"attention_mask包含非法值: {invalid_values.tolist()}，clamp到[0, 1]"
+                )
+                attention_mask = torch.clamp(attention_mask, 0, 1).long()
+                encoding['attention_mask'] = attention_mask
         
         if mask_labels:
             # 创建labels（将padding token mask为-100）
