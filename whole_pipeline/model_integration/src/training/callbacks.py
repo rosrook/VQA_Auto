@@ -411,14 +411,19 @@ class CSVLoggerCallback(Callback):
         """训练开始时初始化CSV文件"""
         import csv
         self.file = open(self.filename, 'w', newline='')
-        self.fieldnames = ['epoch', 'train_loss', 'val_loss']
-        self.writer = csv.DictWriter(self.file, fieldnames=self.fieldnames)
+        # 包含常见字段，包括lr（学习率）
+        self.fieldnames = ['epoch', 'train_loss', 'val_loss', 'lr']
+        # 使用extrasaction='ignore'忽略不在fieldnames中的字段，避免错误
+        self.writer = csv.DictWriter(self.file, fieldnames=self.fieldnames, extrasaction='ignore')
         self.writer.writeheader()
     
     def on_epoch_end(self, trainer: Any, epoch: int, logs: Dict[str, float], **kwargs):
         """每个epoch结束时写入CSV"""
         row = {'epoch': epoch}
-        row.update({k: v for k, v in logs.items() if isinstance(v, (int, float))})
+        # 只添加在fieldnames中的字段，避免字段不匹配错误
+        for k, v in logs.items():
+            if k in self.fieldnames and isinstance(v, (int, float)):
+                row[k] = v
         self.writer.writerow(row)
         self.file.flush()
     
