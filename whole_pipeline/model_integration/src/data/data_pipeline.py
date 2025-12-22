@@ -538,17 +538,40 @@ class DataPipeline:
         
         dataloader_config = self.config.get('dataloader', {})
         
+        # 获取tokenizer和vocab_size（用于safe_collate_fn）
+        tokenizer = None
+        vocab_size = None
+        if hasattr(self, 'tokenizer') and self.tokenizer is not None:
+            tokenizer = self.tokenizer
+            # 尝试获取vocab_size
+            if hasattr(tokenizer, 'vocab_size'):
+                vocab_size = tokenizer.vocab_size
+            elif hasattr(tokenizer, '__len__'):
+                try:
+                    vocab_size = len(tokenizer)
+                except:
+                    pass
+        
         for split_name, dataset in self.datasets.items():
             # 训练集打乱，验证/测试集不打乱
             shuffle = dataloader_config.get('shuffle', True) if split_name == 'train' else False
             
             logger.info(f"创建{split_name} DataLoader...")
+            
+            # 如果dataset有tokenizer，优先使用dataset的tokenizer
+            dataset_tokenizer = tokenizer
+            if hasattr(dataset, 'tokenizer') and dataset.tokenizer is not None:
+                dataset_tokenizer = dataset.tokenizer
+            
             self.dataloaders[split_name] = create_dataloader(
                 dataset=dataset,
                 batch_size=dataloader_config.get('batch_size', 8),
                 shuffle=shuffle,
                 num_workers=dataloader_config.get('num_workers', 0),
-                pin_memory=dataloader_config.get('pin_memory', True)
+                pin_memory=dataloader_config.get('pin_memory', True),
+                tokenizer=dataset_tokenizer,
+                vocab_size=vocab_size,
+                use_safe_collate=True  # 启用安全的collate函数
             )
     
     def get_dataloader(self, split: str):

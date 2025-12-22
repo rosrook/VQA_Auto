@@ -120,6 +120,9 @@ class Trainer:
         logger.info(f"训练样本数: {len(train_dataloader.dataset)}")
         if val_dataloader:
             logger.info(f"验证样本数: {len(val_dataloader.dataset)}")
+        
+        # 验证第一个batch
+        self.validate_first_batch()
     
     def train(self):
         """开始训练"""
@@ -549,6 +552,100 @@ class Trainer:
                     prepared_batch[key] = value
         
         return prepared_batch
+    
+    def validate_first_batch(self):
+        """
+        验证第一个训练batch的数据
+        
+        在训练开始前检查数据是否正确，特别是token IDs是否在有效范围内
+        """
+        logger.info("=" * 60)
+        logger.info("🔍 验证第一个训练batch...")
+        logger.info("=" * 60)
+        
+        try:
+            # 获取第一个batch
+            first_batch = next(iter(self.train_dataloader))
+            
+            # 获取vocab_size
+            vocab_size = None
+            text_vocab_size = None
+            
+            if hasattr(self.model, 'config'):
+                vocab_size = getattr(self.model.config, 'vocab_size', None)
+                # BLIP有单独的text_config
+                if hasattr(self.model.config, 'text_config'):
+                    text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
+            
+            effective_vocab_size = text_vocab_size or vocab_size
+            
+            if effective_vocab_size:
+                logger.info(f"📊 模型词汇表大小: {effective_vocab_size}")
+            else:
+                logger.warning("⚠️  无法获取模型词汇表大小，跳过token ID范围验证")
+            
+            # 检查每个关键字段
+            for key, value in first_batch.items():
+                if isinstance(value, torch.Tensor):
+                    # 移动到CPU检查，避免CUDA错误
+                    value_cpu = value.cpu()
+                    
+                    logger.info(f"\n  {key}:")
+                    logger.info(f"    shape: {value.shape}")
+                    logger.info(f"    dtype: {value.dtype}")
+                    logger.info(f"    device: {value.device}")
+                    logger.info(f"    min: {value_cpu.min().item()}")
+                    logger.info(f"    max: {value_cpu.max().item()}")
+                    
+                    # 检查token ID字段
+                    if 'id' in key.lower() and effective_vocab_size:
+                        max_val = value_cpu.max().item()
+                        min_val = value_cpu.min().item()
+                        
+                        if key == 'labels':
+                            # labels可以是-100，只检查非-100的值
+                            valid_values = value_cpu[value_cpu != -100]
+                            if len(valid_values) > 0:
+                                max_valid = valid_values.max().item()
+                                min_valid = valid_values.min().item()
+                                
+                                if max_valid >= effective_vocab_size or min_valid < 0:
+                                    logger.error(
+                                        f"    ❌ 错误：{key}包含非法token ID: "
+                                        f"[{min_valid}, {max_valid}] vs vocab_size={effective_vocab_size}"
+                                    )
+                                else:
+                                    logger.info(f"    ✅ {key} token ID范围正常: [{min_valid}, {max_valid}]")
+                        else:
+                            # input_ids和decoder_input_ids必须在[0, vocab_size-1]范围内
+                            if max_val >= effective_vocab_size or min_val < 0:
+                                logger.error(
+                                    f"    ❌ 错误：{key}包含非法token ID: "
+                                    f"[{min_val}, {max_val}] vs vocab_size={effective_vocab_size}"
+                                )
+                            else:
+                                logger.info(f"    ✅ {key} token ID范围正常: [{min_val}, {max_val}]")
+                    
+                    # 检查attention_mask
+                    if 'mask' in key.lower():
+                        unique_values = torch.unique(value_cpu)
+                        invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+                        if len(invalid_values) > 0:
+                            logger.error(
+                                f"    ❌ 错误：{key}包含非法值（不是0或1）: {invalid_values.tolist()}"
+                            )
+                        else:
+                            logger.info(f"    ✅ {key}值正常（仅包含0和1）")
+            
+            logger.info("=" * 60)
+            logger.info("✅ 第一个batch验证完成")
+            logger.info("=" * 60)
+            
+        except Exception as e:
+            logger.error(f"❌ 验证第一个batch时出错: {e}")
+            logger.error("这可能导致训练时出现CUDA错误，请检查数据加载代码")
+            import traceback
+            logger.error(traceback.format_exc())
     
     def _call_callbacks(self, method_name: str, **kwargs):
         """调用回调函数"""

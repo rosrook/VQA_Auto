@@ -1011,13 +1011,124 @@ class CausalLMDataset(Dataset):
         }
 
 
+def safe_collate_fn(
+    batch: List[Dict[str, Any]],
+    tokenizer: Optional[Any] = None,
+    vocab_size: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    安全的collate函数，验证和修复token IDs
+    
+    Args:
+        batch: 样本列表
+        tokenizer: tokenizer对象（用于获取vocab_size）
+        vocab_size: 词汇表大小（如果提供，优先使用）
+        
+    Returns:
+        整理后的batch字典
+    """
+    import torch
+    
+    # 获取vocab_size
+    if vocab_size is None and tokenizer is not None:
+        # 尝试多种方式获取vocab_size
+        if hasattr(tokenizer, 'vocab_size'):
+            vocab_size = tokenizer.vocab_size
+        elif hasattr(tokenizer, '__len__'):
+            vocab_size = len(tokenizer)
+        elif hasattr(tokenizer, 'get_vocab'):
+            vocab_size = len(tokenizer.get_vocab())
+    
+    # 默认的collate逻辑：将列表中的字典合并
+    collated = {}
+    if not batch:
+        return collated
+    
+    # 获取所有键
+    keys = batch[0].keys()
+    
+    for key in keys:
+        values = [item[key] for item in batch]
+        
+        # 如果是tensor，stack它们
+        if isinstance(values[0], torch.Tensor):
+            try:
+                collated[key] = torch.stack(values)
+            except RuntimeError as e:
+                # 如果shape不一致，尝试pad
+                logger.warning(f"无法stack {key}，尝试padding: {e}")
+                # 找到最大长度
+                max_len = max(v.shape[-1] if v.dim() > 0 else 1 for v in values)
+                # Pad所有tensor到相同长度
+                padded_values = []
+                for v in values:
+                    if v.dim() == 1:
+                        pad_len = max_len - v.shape[0]
+                        if pad_len > 0:
+                            pad_value = 0 if 'mask' not in key.lower() else 0
+                            v = torch.cat([v, torch.full((pad_len,), pad_value, dtype=v.dtype)])
+                        padded_values.append(v)
+                    else:
+                        padded_values.append(v)
+                collated[key] = torch.stack(padded_values)
+        elif isinstance(values[0], (list, tuple)):
+            # 列表或元组，保持原样或转换为tensor
+            collated[key] = values
+        else:
+            collated[key] = values
+    
+    # 验证和修复token IDs
+    if vocab_size is not None:
+        for key in ['input_ids', 'decoder_input_ids', 'labels']:
+            if key in collated and isinstance(collated[key], torch.Tensor):
+                tensor = collated[key]
+                
+                # 在CPU上检查，避免CUDA错误
+                tensor_cpu = tensor.cpu()
+                max_val = tensor_cpu.max().item()
+                min_val = tensor_cpu.min().item()
+                
+                if key == 'labels':
+                    # labels可以是-100（用于mask），只检查非-100的值
+                    valid_tensor = tensor_cpu[tensor_cpu != -100]
+                    if len(valid_tensor) > 0:
+                        max_valid = valid_tensor.max().item()
+                        min_valid = valid_tensor.min().item()
+                        
+                        if max_valid >= vocab_size or min_valid < 0:
+                            logger.warning(
+                                f"⚠️  {key}包含非法值: [{min_valid}, {max_valid}] vs vocab_size={vocab_size}, "
+                                f"修复中..."
+                            )
+                            # 创建mask：非-100且超出范围的值
+                            mask = (tensor_cpu != -100) & ((tensor_cpu < 0) | (tensor_cpu >= vocab_size))
+                            tensor_cpu[mask] = -100
+                            collated[key] = tensor_cpu.to(tensor.device) if tensor.is_cuda else tensor_cpu
+                else:
+                    # input_ids和decoder_input_ids必须在[0, vocab_size-1]范围内
+                    if max_val >= vocab_size or min_val < 0:
+                        logger.warning(
+                            f"⚠️  {key}包含非法值: [{min_val}, {max_val}] vs vocab_size={vocab_size}, "
+                            f"修复中..."
+                        )
+                        # Clamp到有效范围
+                        tensor_cpu = torch.clamp(tensor_cpu, 0, vocab_size - 1)
+                        collated[key] = tensor_cpu.to(tensor.device) if tensor.is_cuda else tensor_cpu
+                        logger.info(f"   ✅ {key}修复后: min={tensor_cpu.min().item()}, max={tensor_cpu.max().item()}")
+    
+    return collated
+
+
 def create_dataloader(
     dataset: Dataset,
     batch_size: int = 8,
     shuffle: bool = True,
     num_workers: int = 0,
     pin_memory: bool = True,
-    collate_fn: Optional[Callable] = None
+    collate_fn: Optional[Callable] = None,
+    tokenizer: Optional[Any] = None,
+    vocab_size: Optional[int] = None,
+    use_safe_collate: bool = True
 ) -> DataLoader:
     """
     创建DataLoader
@@ -1028,11 +1139,24 @@ def create_dataloader(
         shuffle: 是否打乱
         num_workers: 数据加载进程数
         pin_memory: 是否固定内存
-        collate_fn: 自定义collate函数
+        collate_fn: 自定义collate函数（如果提供，优先使用）
+        tokenizer: tokenizer对象（用于safe_collate_fn获取vocab_size）
+        vocab_size: 词汇表大小（用于safe_collate_fn）
+        use_safe_collate: 是否使用安全的collate函数（默认True）
         
     Returns:
         DataLoader对象
     """
+    # 如果没有提供collate_fn且use_safe_collate=True，使用safe_collate_fn
+    if collate_fn is None and use_safe_collate:
+        # 尝试从dataset获取tokenizer
+        if tokenizer is None and hasattr(dataset, 'tokenizer'):
+            tokenizer = dataset.tokenizer
+        
+        # 创建partial函数，绑定tokenizer和vocab_size
+        from functools import partial
+        collate_fn = partial(safe_collate_fn, tokenizer=tokenizer, vocab_size=vocab_size)
+    
     return DataLoader(
         dataset,
         batch_size=batch_size,
