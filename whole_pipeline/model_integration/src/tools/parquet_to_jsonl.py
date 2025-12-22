@@ -32,6 +32,8 @@ IMAGE_KEYS = ["image", "jpg", "img"]
 QUESTION_KEY = "question"
 ANSWER_KEY = "answer"
 HINT_KEY = "hint"
+# 可能的选项字段（按顺序追加）
+OPTION_KEYS = ["A", "B", "C", "D", "E", "F", "G", "H"]
 
 
 def is_base64_image(s: Optional[str]) -> bool:
@@ -60,19 +62,23 @@ def pick_image(row: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def build_question(question: Optional[str], hint: Optional[str]) -> Optional[str]:
+def build_question(question: Optional[str], hint: Optional[str], options: Optional[List[str]]) -> Optional[str]:
+    """构建最终 question，附加 hint 与选项"""
     if question is None:
         return None
-    question = str(question)
+    q = str(question)
+    parts = [q]
     if hint:
-        question = f"{question}\n{hint}"
-    return question
+        parts.append(str(hint))
+    if options:
+        parts.extend(options)
+    return "\n".join(parts)
 
 
 def iter_rows(pf: pq.ParquetFile, limit: int) -> List[Dict[str, str]]:
     # 只选择需要的列，避免无谓读取
     available_cols = set(pf.schema.names)
-    cols = [c for c in [QUESTION_KEY, ANSWER_KEY, HINT_KEY, *IMAGE_KEYS] if c in available_cols]
+    cols = [c for c in [QUESTION_KEY, ANSWER_KEY, HINT_KEY, *IMAGE_KEYS, *OPTION_KEYS] if c in available_cols]
 
     results = []
     for batch in pf.iter_batches(batch_size=512, columns=cols):
@@ -84,6 +90,14 @@ def iter_rows(pf: pq.ParquetFile, limit: int) -> List[Dict[str, str]]:
             a = data.get(ANSWER_KEY, [None] * length)[i]
             h = data.get(HINT_KEY, [None] * length)[i]
 
+            # 选项收集（按 A,B,C... 顺序，非空才收）
+            opts = []
+            for key in OPTION_KEYS:
+                if key in data:
+                    val = data[key][i]
+                    if val is not None:
+                        opts.append(f"{key}: {val}")
+
             img = None
             for k in IMAGE_KEYS:
                 if k in data:
@@ -92,7 +106,7 @@ def iter_rows(pf: pq.ParquetFile, limit: int) -> List[Dict[str, str]]:
                         img = normalize_image(str(val))
                         break
 
-            q_final = build_question(q, h)
+            q_final = build_question(q, h, opts if opts else None)
             a_final = None if a is None else str(a)
 
             if q_final is None or a_final is None or img is None:
