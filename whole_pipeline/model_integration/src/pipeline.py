@@ -36,6 +36,80 @@ from utils.metrics import compute_metrics, accuracy, exact_match, f1_score
 logger = logging.getLogger(__name__)
 
 
+def _safe_float(value, default=None):
+    """
+    安全地将配置值转换为浮点数
+    处理科学计数法字符串（如 '3e-5'）被PyYAML解析为字符串的情况
+    
+    Args:
+        value: 待转换的值（可能是int, float, str）
+        default: 如果转换失败，返回的默认值
+        
+    Returns:
+        浮点数，如果转换失败则返回default
+    """
+    if value is None:
+        return default
+    
+    # 如果已经是数字类型，直接返回
+    if isinstance(value, (int, float)):
+        return float(value)
+    
+    # 如果是字符串，尝试转换
+    if isinstance(value, str):
+        value = value.strip()
+        # 尝试直接转换为浮点数
+        try:
+            return float(value)
+        except ValueError:
+            # 如果失败，可能是科学计数法字符串，尝试eval（安全）
+            try:
+                # 只允许数字、小数点、e/E、+/-、空格
+                if all(c in '0123456789.eE+- ' for c in value):
+                    result = eval(value)
+                    if isinstance(result, (int, float)):
+                        return float(result)
+            except:
+                pass
+    
+    # 如果所有转换都失败，返回默认值
+    logger.warning(f"无法将值 '{value}' 转换为浮点数，使用默认值 {default}")
+    return default
+
+
+def _safe_int(value, default=None):
+    """
+    安全地将配置值转换为整数
+    
+    Args:
+        value: 待转换的值
+        default: 如果转换失败，返回的默认值
+        
+    Returns:
+        整数，如果转换失败则返回default
+    """
+    if value is None:
+        return default
+    
+    if isinstance(value, int):
+        return value
+    
+    if isinstance(value, float):
+        return int(value)
+    
+    if isinstance(value, str):
+        try:
+            # 先转换为浮点数（处理科学计数法），再转换为整数
+            float_val = _safe_float(value)
+            if float_val is not None:
+                return int(float_val)
+        except:
+            pass
+    
+    logger.warning(f"无法将值 '{value}' 转换为整数，使用默认值 {default}")
+    return default
+
+
 class VQAPipeline:
     """VQA任务主管线"""
     
@@ -188,19 +262,51 @@ class VQAPipeline:
         
         # 优化器配置
         optimizer_config = training_config.get('optimizer', {})
-        lr = optimizer_config.get('lr', 3e-5)
-        weight_decay = optimizer_config.get('weight_decay', 0.01)
+        lr = _safe_float(optimizer_config.get('lr'), 3e-5)
+        weight_decay = _safe_float(optimizer_config.get('weight_decay'), 0.01)
         optimizer_type = optimizer_config.get('type', 'adamw')
+        
+        # 处理其他优化器参数（如betas, eps等）
+        optimizer_kwargs = {}
+        if 'betas' in optimizer_config:
+            betas = optimizer_config.get('betas')
+            if isinstance(betas, list) and len(betas) == 2:
+                optimizer_kwargs['betas'] = (
+                    _safe_float(betas[0], 0.9),
+                    _safe_float(betas[1], 0.999)
+                )
+        if 'eps' in optimizer_config:
+            optimizer_kwargs['eps'] = _safe_float(optimizer_config.get('eps'), 1e-8)
         
         from torch.optim import AdamW, Adam, SGD
         if optimizer_type.lower() == 'adamw':
-            optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = AdamW(
+                self.model.parameters(), 
+                lr=lr, 
+                weight_decay=weight_decay,
+                **optimizer_kwargs
+            )
         elif optimizer_type.lower() == 'adam':
-            optimizer = Adam(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = Adam(
+                self.model.parameters(), 
+                lr=lr, 
+                weight_decay=weight_decay,
+                **optimizer_kwargs
+            )
         elif optimizer_type.lower() == 'sgd':
-            optimizer = SGD(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = SGD(
+                self.model.parameters(), 
+                lr=lr, 
+                weight_decay=weight_decay,
+                **optimizer_kwargs
+            )
         else:
-            optimizer = AdamW(self.model.parameters(), lr=lr, weight_decay=weight_decay)
+            optimizer = AdamW(
+                self.model.parameters(), 
+                lr=lr, 
+                weight_decay=weight_decay,
+                **optimizer_kwargs
+            )
         
         # 学习率调度器
         scheduler = None
@@ -211,19 +317,25 @@ class VQAPipeline:
             
             from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR, ReduceLROnPlateau
             if scheduler_type == 'cosine':
-                scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs)
+                T_max = scheduler_config.get('T_max')
+                if T_max is None:
+                    T_max = num_epochs
+                else:
+                    T_max = _safe_int(T_max, num_epochs)
+                eta_min = _safe_float(scheduler_config.get('eta_min'), 0.0)
+                scheduler = CosineAnnealingLR(optimizer, T_max=T_max, eta_min=eta_min)
             elif scheduler_type == 'step':
                 scheduler = StepLR(
                     optimizer,
-                    step_size=scheduler_config.get('step_size', 1),
-                    gamma=scheduler_config.get('gamma', 0.1)
+                    step_size=_safe_int(scheduler_config.get('step_size'), 1),
+                    gamma=_safe_float(scheduler_config.get('gamma'), 0.1)
                 )
             elif scheduler_type == 'reduce_on_plateau':
                 scheduler = ReduceLROnPlateau(
                     optimizer,
-                    mode='min',
-                    factor=scheduler_config.get('factor', 0.5),
-                    patience=scheduler_config.get('patience', 2)
+                    mode=scheduler_config.get('mode', 'min'),
+                    factor=_safe_float(scheduler_config.get('factor'), 0.5),
+                    patience=_safe_int(scheduler_config.get('patience'), 2)
                 )
         
         # 创建评估器
@@ -243,8 +355,8 @@ class VQAPipeline:
         if early_stopping_config.get('enabled', False):
             callbacks.append(EarlyStoppingCallback(
                 monitor=early_stopping_config.get('monitor', 'val_loss'),
-                patience=early_stopping_config.get('patience', 5),
-                min_delta=early_stopping_config.get('min_delta', 0.0),
+                patience=_safe_int(early_stopping_config.get('patience'), 5),
+                min_delta=_safe_float(early_stopping_config.get('min_delta'), 0.0),
                 mode=early_stopping_config.get('mode', 'min')
             ))
         
@@ -255,7 +367,7 @@ class VQAPipeline:
         
         self.checkpoint_manager = CheckpointManager(
             checkpoint_dir=str(checkpoint_dir),
-            max_checkpoints=training_config.get('max_checkpoints', 5),
+            max_checkpoints=_safe_int(training_config.get('max_checkpoints'), 5),
             best_metric=early_stopping_config.get('monitor', 'val_loss'),
             mode=early_stopping_config.get('mode', 'min')
         )
@@ -285,6 +397,11 @@ class VQAPipeline:
             freeze_model(self.model, freeze_layers=freeze_layers if freeze_layers else None)
         
         # 创建训练器
+        # 处理max_grad_norm（可能是None或浮点数）
+        max_grad_norm = training_config.get('max_grad_norm')
+        if max_grad_norm is not None:
+            max_grad_norm = _safe_float(max_grad_norm)
+        
         self.trainer = Trainer(
             model=self.model,
             train_dataloader=train_loader,
@@ -293,9 +410,9 @@ class VQAPipeline:
             scheduler=scheduler,
             callbacks=callbacks,
             evaluator=self.evaluator,
-            num_epochs=training_config.get('num_epochs', 3),
-            gradient_accumulation_steps=training_config.get('gradient_accumulation_steps', 1),
-            max_grad_norm=training_config.get('max_grad_norm'),
+            num_epochs=_safe_int(training_config.get('num_epochs'), 3),
+            gradient_accumulation_steps=_safe_int(training_config.get('gradient_accumulation_steps'), 1),
+            max_grad_norm=max_grad_norm,
             fp16=training_config.get('fp16', False),
             save_dir=str(checkpoint_dir),
             **kwargs
