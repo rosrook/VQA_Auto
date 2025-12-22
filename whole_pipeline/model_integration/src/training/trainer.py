@@ -735,17 +735,34 @@ class Trainer:
                 # 找出所有非法值
                 invalid_mask = (input_ids_cpu < 0) | (input_ids_cpu >= effective_vocab_size)
                 invalid_count = invalid_mask.sum().item()
+                total_count = input_ids_cpu.numel()
+                repair_ratio = invalid_count / total_count if total_count > 0 else 0
                 
                 if invalid_count > 0:
-                    debug_logger.error(f"❌ 发现 {invalid_count} 个非法input_ids值")
+                    debug_logger.error(f"❌ 发现 {invalid_count} 个非法input_ids值（占总数的{repair_ratio*100:.2f}%）")
                     debug_logger.error(f"   范围: [{min_id}, {max_id}] vs [0, {effective_vocab_size-1}]")
                     
-                    # 修复策略：将所有非法值clamp到有效范围
+                    # 如果修复比例过高，发出严重警告
+                    if repair_ratio > 0.01:  # 超过1%
+                        debug_logger.error(f"   ⚠️⚠️⚠️ 严重警告: {repair_ratio*100:.2f}%的input_ids被修复！")
+                        debug_logger.error(f"   这可能导致训练数据质量问题，请检查数据源和tokenizer配置！")
+                    
+                    # 记录被修复的值
+                    invalid_values = input_ids_cpu[invalid_mask].unique()
+                    if len(invalid_values) > 0:
+                        debug_logger.error(f"   被修复的值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
+                        if len(invalid_values) <= 20:
+                            debug_logger.error(f"   被修复的值列表: {invalid_values.tolist()}")
+                    
+                    # 修复策略：使用unk_token_id而不是clamp（更合理）
                     pad_id = getattr(self.model.config, 'pad_token_id', 0)
                     unk_id = getattr(self.model.config, 'unk_token_id', pad_id)
                     
-                    debug_logger.warning(f"   🔧 Clamping所有值到有效范围...")
-                    input_ids_cpu = torch.clamp(input_ids_cpu, 0, effective_vocab_size - 1)
+                    debug_logger.warning(f"   🔧 使用unk_token_id={unk_id}修复非法值...")
+                    # 对于超出上限的值，使用unk_token_id
+                    input_ids_cpu[invalid_mask & (input_ids_cpu >= effective_vocab_size)] = unk_id
+                    # 对于负值，clamp到0
+                    input_ids_cpu[invalid_mask & (input_ids_cpu < 0)] = 0
                     input_ids = input_ids_cpu
                     
                     # 验证修复后
@@ -859,12 +876,19 @@ class Trainer:
                         # 找出所有非法值（包括负值，除了-100）
                         invalid_mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
                         invalid_count = invalid_mask.sum().item()
+                        total_valid_labels = (labels_cpu != -100).sum().item()
+                        mask_ratio = invalid_count / total_valid_labels if total_valid_labels > 0 else 0
                         
                         if invalid_count > 0:
                             debug_logger.error(f"❌ 发现 {invalid_count} 个非法labels值")
                             invalid_values = labels_cpu[invalid_mask].unique()
                             debug_logger.error(f"   非法值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
                             debug_logger.error(f"   vocab_size: {effective_vocab_size}")
+                            
+                            # 如果mask比例过高，发出严重警告
+                            if mask_ratio > 0.20:  # 超过20%
+                                debug_logger.error(f"   ⚠️⚠️⚠️ 严重警告: {mask_ratio*100:.2f}%的有效labels被mask！")
+                                debug_logger.error(f"   这可能导致训练信号不足，请检查数据源和tokenizer配置！")
                             
                             # 检查是否有负值（除了-100）
                             negative_mask = (labels_cpu != -100) & (labels_cpu < 0)
@@ -1021,13 +1045,37 @@ class Trainer:
                             invalid_mask = (tensor_cpu < 0) | (tensor_cpu >= effective_vocab_size)
                             if invalid_mask.any():
                                 invalid_count = invalid_mask.sum().item()
+                                total_count = tensor_cpu.numel()
+                                repair_ratio = invalid_count / total_count
+                                
                                 if batch_idx == 0:
-                                    debug_logger.error(f"❌ {key}在GPU上有 {invalid_count} 个非法值，修复中...")
-                                # 修复
-                                tensor_cpu = torch.clamp(tensor_cpu, 0, effective_vocab_size - 1)
+                                    debug_logger.error(f"❌ {key}在GPU上有 {invalid_count} 个非法值（占总数的{repair_ratio*100:.2f}%），修复中...")
+                                    
+                                    # 如果修复比例过高，发出严重警告
+                                    if repair_ratio > 0.01:  # 超过1%
+                                        debug_logger.error(f"   ⚠️⚠️⚠️ 严重警告: {repair_ratio*100:.2f}%的值被修复！")
+                                        debug_logger.error(f"   这可能导致训练数据质量问题，请检查数据源和tokenizer配置！")
+                                    
+                                    # 记录被修复的值范围
+                                    invalid_values = tensor_cpu[invalid_mask].unique()
+                                    if len(invalid_values) > 0:
+                                        debug_logger.error(f"   被修复的值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
+                                        if len(invalid_values) <= 20:
+                                            debug_logger.error(f"   被修复的值列表: {invalid_values.tolist()}")
+                                
+                                # 修复：使用unk_token_id而不是clamp（更合理）
+                                unk_token_id = getattr(self.model.config, 'unk_token_id', None)
+                                if unk_token_id is None:
+                                    unk_token_id = getattr(self.model.config, 'pad_token_id', 0)
+                                
+                                # 对于超出上限的值，使用unk_token_id
+                                # 对于负值，clamp到0
+                                tensor_cpu[invalid_mask & (tensor_cpu >= effective_vocab_size)] = unk_token_id
+                                tensor_cpu[invalid_mask & (tensor_cpu < 0)] = 0
+                                
                                 batch[key] = tensor_cpu.to(tensor.device)
                                 if batch_idx == 0:
-                                    debug_logger.warning(f"   ✅ 已修复{key}的非法值")
+                                    debug_logger.warning(f"   ✅ 已修复{key}的非法值（使用unk_token_id={unk_token_id}）")
                             elif batch_idx == 0:
                                 debug_logger.info(f"   ✅ {key}值正常: [{tensor_cpu.min().item()}, {tensor_cpu.max().item()}]")
                     elif 'mask' in key.lower():
