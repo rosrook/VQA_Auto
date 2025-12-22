@@ -408,7 +408,7 @@ def main():
     print("开始执行测试（流式加载模式）...")
     print("="*60)
     
-    test_executor = TestExecutor(model_adapter)
+    test_executor = TestExecutor(model_adapter, verbose=True)
     result_analyzer = ResultAnalyzer(accuracy_threshold=args.accuracy_threshold)
     
     all_results = []
@@ -429,15 +429,46 @@ def main():
         print(f"✓ Benchmark加载成功: {bench_name}")
         
         # 运行测试（流式处理）
-        results = test_executor.run_benchmark(
-            benchmark=benchmark,
-            max_samples=args.max_samples,
-            batch_size=args.batch_size,
-            verbose=True
-        )
+        print(f"\n  📝 Benchmark信息:")
+        bench_info = benchmark.get_info()
+        print(f"     名称: {bench_info['name']}")
+        print(f"     HF ID: {bench_info.get('hf_id', 'N/A')}")
+        print(f"     Split: {bench_info.get('split', 'N/A')}")
+        print(f"     模式: {'流式加载' if bench_info.get('use_streaming') else '批量加载'}")
+        
+        try:
+            results = test_executor.run_benchmark(
+                benchmark=benchmark,
+                max_samples=args.max_samples,
+                batch_size=args.batch_size,
+                verbose=True
+            )
+            
+            if not results:
+                print(f"  ⚠️  警告: 没有获得任何测试结果")
+                continue
+            
+            print(f"\n  📊 收集到 {len(results)} 个测试结果")
+        
+        except KeyboardInterrupt:
+            print(f"\n  ⚠️  用户中断了 {bench_name} 的测试")
+            break
+        
+        except Exception as e:
+            print(f"\n  ✗ 测试 {bench_name} 时发生错误: {e}")
+            import traceback
+            traceback.print_exc()
+            continue
         
         # 分析结果
+        print(f"\n  📈 分析结果...")
         summary = result_analyzer.analyze_results(benchmark.name, results)
+        
+        print(f"     总任务数: {summary.total_tasks}")
+        print(f"     正确答案: {summary.correct_count}")
+        print(f"     准确率: {summary.accuracy:.2%}")
+        print(f"     平均分数: {summary.average_score:.3f}")
+        print(f"     失败案例: {len(summary.failed_cases)}")
         
         all_results.append({
             "benchmark_name": summary.benchmark_name,

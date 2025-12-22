@@ -194,8 +194,8 @@ from pathlib import Path
 current_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(current_dir))
 
-from benchmarks.base_benchmark import BaseBenchmark, BenchmarkTask
-from benchmarks.huggingface_benchmark import HuggingFaceBenchmark
+from ..benchmarks.base_benchmark import BaseBenchmark, BenchmarkTask
+from ..benchmarks.huggingface_benchmark import HuggingFaceBenchmark
 
 
 class BenchmarkManager:
