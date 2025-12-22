@@ -293,7 +293,7 @@ class ModelLoader:
     
     def _load_processor(self) -> Dict[str, Any]:
         """
-        加载processor
+        加载processor，强制使用BLIP专用类并检测不匹配
         
         Returns:
             包含processor, tokenizer, image_processor的字典
@@ -303,13 +303,48 @@ class ModelLoader:
         try:
             # 尝试加载完整的processor
             if self.model_type == 'blip':
+                # 检查BlipProcessor是否可用
+                if BlipProcessor == AutoProcessor:
+                    logger.error("=" * 60)
+                    logger.error("⚠️⚠️⚠️ 严重警告: 无法导入BlipProcessor！")
+                    logger.error("   当前使用AutoProcessor作为回退，这可能导致不匹配问题！")
+                    logger.error("   建议: 升级transformers版本 (>=4.30.0) 或检查安装")
+                    logger.error("=" * 60)
+                else:
+                    logger.info("✅ 使用BLIP专用processor: BlipProcessor")
+                
                 processor = BlipProcessor.from_pretrained(self.model_name)
                 result = {
                     'processor': processor,
                     'tokenizer': processor.tokenizer,
                     'image_processor': processor.image_processor
                 }
-                logger.info("使用BlipProcessor")
+                
+                # 验证processor类型
+                processor_type = type(processor).__name__
+                tokenizer_type = type(processor.tokenizer).__name__
+                image_processor_type = type(processor.image_processor).__name__
+                
+                logger.info(f"Processor类型: {processor_type}")
+                logger.info(f"Tokenizer类型: {tokenizer_type}")
+                logger.info(f"ImageProcessor类型: {image_processor_type}")
+                
+                # 检查是否使用了正确的BLIP类
+                if 'BlipProcessor' not in processor_type:
+                    logger.error("⚠️⚠️⚠️ 严重警告: processor不是BlipProcessor类型！")
+                    logger.error(f"   实际类型: {processor_type}")
+                
+                if 'BlipTokenizer' not in tokenizer_type:
+                    logger.error("⚠️⚠️⚠️ 严重警告: tokenizer不是BlipTokenizer类型！")
+                    logger.error(f"   实际类型: {tokenizer_type}")
+                
+                if 'BlipImageProcessor' not in image_processor_type:
+                    logger.error("⚠️⚠️⚠️ 严重警告: image_processor不是BlipImageProcessor类型！")
+                    logger.error(f"   实际类型: {image_processor_type}")
+                
+                # 验证vocab_size匹配
+                if self.model is not None:
+                    self._verify_processor_model_match(processor, self.model)
             else:
                 # 使用AutoProcessor
                 from transformers import AutoProcessor
@@ -325,8 +360,49 @@ class ModelLoader:
             
             return result
         except Exception as e:
-            logger.warning(f"加载processor失败: {e}，返回空字典")
+            logger.error(f"加载processor失败: {e}")
+            if self.model_type == 'blip':
+                logger.error("⚠️⚠️⚠️ 严重警告: BLIP processor加载失败！")
+                logger.error("   这可能导致processor与模型不匹配！")
+            logger.warning("返回空字典")
             return {}
+    
+    def _verify_processor_model_match(self, processor, model):
+        """
+        验证processor与模型的匹配性（vocab_size等）
+        
+        Args:
+            processor: 加载的processor
+            model: 加载的模型
+        """
+        try:
+            # 检查tokenizer的vocab_size
+            if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
+                tokenizer_vocab_size = getattr(processor.tokenizer, 'vocab_size', None)
+                
+                # 检查模型的vocab_size
+                model_vocab_size = None
+                if hasattr(model, 'config'):
+                    model_vocab_size = getattr(model.config, 'vocab_size', None)
+                    # BLIP可能有text_config
+                    if model_vocab_size is None and hasattr(model.config, 'text_config'):
+                        text_config = model.config.text_config
+                        model_vocab_size = getattr(text_config, 'vocab_size', None)
+                
+                if tokenizer_vocab_size is not None and model_vocab_size is not None:
+                    if tokenizer_vocab_size != model_vocab_size:
+                        logger.error("=" * 60)
+                        logger.error("⚠️⚠️⚠️ 严重警告: vocab_size不匹配！")
+                        logger.error(f"   Tokenizer vocab_size: {tokenizer_vocab_size}")
+                        logger.error(f"   Model vocab_size: {model_vocab_size}")
+                        logger.error("   这可能导致训练或推理错误！")
+                        logger.error("=" * 60)
+                    else:
+                        logger.info(f"✅ vocab_size匹配: {tokenizer_vocab_size}")
+                else:
+                    logger.warning("无法验证vocab_size匹配（缺少vocab_size信息）")
+        except Exception as e:
+            logger.warning(f"验证processor-model匹配时出错: {e}")
     
     def get_model(self) -> PreTrainedModel:
         """获取模型"""
