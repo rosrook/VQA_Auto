@@ -379,12 +379,14 @@ class VQADataset(Dataset):
         if self.image_processor is not None:
             processed = self.image_processor(images=image, return_tensors="pt")
             # 兼容processor返回dict/BatchFeature
-            if isinstance(processed, dict) and 'pixel_values' in processed:
+            # BatchFeature是dict-like，但isinstance(processed, dict)在某些版本可能失败
+            # 直接检查是否有pixel_values键更安全
+            if hasattr(processed, 'pixel_values') or 'pixel_values' in processed:
                 return processed['pixel_values'].squeeze(0)
             # 如果processor直接返回tensor
             if isinstance(processed, torch.Tensor):
                 return processed
-            raise ValueError(f"无法从processor输出解析pixel_values: type={type(processed)}")
+            raise ValueError(f"无法从processor输出解析pixel_values: type={type(processed)}, keys={list(processed.keys()) if hasattr(processed, 'keys') else 'N/A'}")
         else:
             if self._default_image_transform:
                 return self._default_image_transform(image)
@@ -542,11 +544,14 @@ class ImageCaptioningDataset(Dataset):
         """统一的图像处理，兼容HF processor与默认transform"""
         if self.image_processor is not None:
             processed = self.image_processor(images=image, return_tensors="pt")
-            if isinstance(processed, dict) and 'pixel_values' in processed:
+            # 兼容processor返回dict/BatchFeature
+            # BatchFeature是dict-like，但isinstance(processed, dict)在某些版本可能失败
+            # 直接检查是否有pixel_values键更安全
+            if hasattr(processed, 'pixel_values') or 'pixel_values' in processed:
                 return processed['pixel_values'].squeeze(0)
             if isinstance(processed, torch.Tensor):
                 return processed
-            raise ValueError(f"无法从processor输出解析pixel_values: type={type(processed)}")
+            raise ValueError(f"无法从processor输出解析pixel_values: type={type(processed)}, keys={list(processed.keys()) if hasattr(processed, 'keys') else 'N/A'}")
         else:
             if self._default_image_transform:
                 return self._default_image_transform(image)

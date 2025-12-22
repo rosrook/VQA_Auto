@@ -358,7 +358,12 @@ class LazyLoadVQADataset(Dataset):
         
         # 2. 处理图像
         if self.image_processor is not None:
-            pixel_values = self.image_processor(images=image, return_tensors="pt")['pixel_values'].squeeze(0)
+            processed = self.image_processor(images=image, return_tensors="pt")
+            # BatchFeature是dict-like，支持字典式访问，但为了安全先检查
+            if hasattr(processed, 'pixel_values') or 'pixel_values' in processed:
+                pixel_values = processed['pixel_values'].squeeze(0)
+            else:
+                raise ValueError(f"无法从processor输出解析pixel_values: type={type(processed)}, keys={list(processed.keys()) if hasattr(processed, 'keys') else 'N/A'}")
         else:
             import torchvision.transforms as transforms
             default_transform = transforms.Compose([
@@ -515,7 +520,12 @@ class StreamingVQADataset(IterableDataset):
                 
                 # 处理图像
                 if self.image_processor is not None:
-                    pixel_values = self.image_processor(images=image, return_tensors="pt")['pixel_values'].squeeze(0)
+                    processed = self.image_processor(images=image, return_tensors="pt")
+                    # BatchFeature是dict-like，支持字典式访问，但为了安全先检查
+                    if hasattr(processed, 'pixel_values') or 'pixel_values' in processed:
+                        pixel_values = processed['pixel_values'].squeeze(0)
+                    else:
+                        raise ValueError(f"无法从processor输出解析pixel_values: type={type(processed)}, keys={list(processed.keys()) if hasattr(processed, 'keys') else 'N/A'}")
                 else:
                     import torchvision.transforms as transforms
                     transform = transforms.Compose([
