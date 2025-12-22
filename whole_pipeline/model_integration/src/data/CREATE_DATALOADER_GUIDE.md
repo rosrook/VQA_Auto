@@ -173,19 +173,22 @@ print(f"预处理完成，共 {len(processed_data)} 条数据")
 
 ```python
 # 3. 加载tokenizer和image processor
-from transformers import BlipProcessor
+from transformers import AutoProcessor  # 官方推荐方式
 
 model_name = "Salesforce/blip-vqa-base"
 
 # 方式1：使用完整的processor（推荐）
-blip_processor = BlipProcessor.from_pretrained(model_name)
-tokenizer = blip_processor.tokenizer
-image_processor = blip_processor.image_processor
+# 使用AutoProcessor（官方推荐方式）
+# AutoProcessor会自动选择正确的processor类（如BlipProcessor）
+processor = AutoProcessor.from_pretrained(model_name)
+tokenizer = processor.tokenizer
+image_processor = processor.image_processor
 
 # 方式2：分别加载
-# from transformers import BlipTokenizer, BlipImageProcessor
-# tokenizer = BlipTokenizer.from_pretrained(model_name)
-# image_processor = BlipImageProcessor.from_pretrained(model_name)
+# 或者分别加载（如果需要）
+# from transformers import AutoTokenizer, AutoImageProcessor
+# tokenizer = AutoTokenizer.from_pretrained(model_name)
+# image_processor = AutoImageProcessor.from_pretrained(model_name)
 ```
 
 ### 步骤4：创建Dataset
@@ -252,7 +255,7 @@ for batch_idx, batch in enumerate(train_loader):
 from data_loader import DataLoader
 from data_processor import DataProcessor
 from dataset import VQADataset, create_dataloader
-from transformers import BlipProcessor
+from transformers import AutoProcessor  # 官方推荐方式
 
 def create_vqa_dataloader(
     jsonl_path: str,
@@ -290,9 +293,11 @@ def create_vqa_dataloader(
     
     # 3. 加载processor
     print(f"加载processor: {model_name}...")
-    blip_processor = BlipProcessor.from_pretrained(model_name)
-    tokenizer = blip_processor.tokenizer
-    image_processor = blip_processor.image_processor
+    # 使用AutoProcessor（官方推荐方式）
+    # AutoProcessor会自动选择正确的processor类（如BlipProcessor）
+    processor = AutoProcessor.from_pretrained(model_name)
+    tokenizer = processor.tokenizer
+    image_processor = processor.image_processor
     print("  Processor加载完成")
     
     # 4. 创建Dataset

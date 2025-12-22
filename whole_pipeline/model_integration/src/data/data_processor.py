@@ -16,45 +16,18 @@ from transformers import (
     AutoTokenizer,
 )
 
-# 安全导入特定processor类（如果不存在则使用Auto类）
-try:
-    from transformers import BlipProcessor, BlipImageProcessor, BlipTokenizer
-except ImportError:
-    BlipProcessor = AutoProcessor
-    BlipImageProcessor = AutoImageProcessor
-    BlipTokenizer = AutoTokenizer
-
-try:
-    from transformers import CLIPProcessor, CLIPImageProcessor, CLIPTokenizer
-except ImportError:
-    CLIPProcessor = AutoProcessor
-    CLIPImageProcessor = AutoImageProcessor
-    CLIPTokenizer = AutoTokenizer
-
 logger = logging.getLogger(__name__)
-
-# 在logger创建后记录警告信息
-if BlipProcessor == AutoProcessor:
-    logger.warning(
-        "无法导入 BlipProcessor/BlipImageProcessor/BlipTokenizer，"
-        "将使用 AutoProcessor/AutoImageProcessor/AutoTokenizer 作为回退"
-    )
-if CLIPProcessor == AutoProcessor:
-    logger.warning(
-        "无法导入 CLIPProcessor/CLIPImageProcessor/CLIPTokenizer，"
-        "将使用 AutoProcessor/AutoImageProcessor/AutoTokenizer 作为回退"
-    )
 
 
 class DataProcessor:
     """统一的数据处理器，支持多种processor"""
     
-    # 支持的processor类型映射
+    # 支持的processor类型映射（使用官方推荐的Auto类）
     PROCESSOR_REGISTRY = {
         'blip': {
-            'processor_class': BlipProcessor,
-            'image_processor_class': BlipImageProcessor,
-            'tokenizer_class': BlipTokenizer,
+            'processor_class': AutoProcessor,  # 官方推荐：AutoProcessor会自动选择BlipProcessor
+            'image_processor_class': AutoImageProcessor,  # 官方推荐：AutoImageProcessor会自动选择BlipImageProcessor
+            'tokenizer_class': AutoTokenizer,  # 官方推荐：AutoTokenizer会自动选择BlipTokenizer
             'model_ids': [
                 'Salesforce/blip-vqa-base',
                 'Salesforce/blip-vqa-capfilt-large',
@@ -63,9 +36,9 @@ class DataProcessor:
             ]
         },
         'clip': {
-            'processor_class': CLIPProcessor,
-            'image_processor_class': CLIPImageProcessor,
-            'tokenizer_class': CLIPTokenizer,
+            'processor_class': AutoProcessor,  # 官方推荐：AutoProcessor会自动选择CLIPProcessor
+            'image_processor_class': AutoImageProcessor,  # 官方推荐：AutoImageProcessor会自动选择CLIPImageProcessor
+            'tokenizer_class': AutoTokenizer,  # 官方推荐：AutoTokenizer会自动选择CLIPTokenizer
             'model_ids': [
                 'openai/clip-vit-base-patch32',
                 'openai/clip-vit-base-patch16',

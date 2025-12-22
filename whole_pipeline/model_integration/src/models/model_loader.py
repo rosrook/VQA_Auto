@@ -7,34 +7,15 @@ import torch
 from typing import Optional, Dict, Any, Union
 from pathlib import Path
 from transformers import (
-    AutoModelForSeq2SeqLM,  # Seq2Seq任务（T5/BLIP/VQA）- transformers >=4.5.0推荐
+    AutoModelForVisualQuestionAnswering,  # VQA任务（官方推荐）
+    AutoModelForSeq2SeqLM,  # Seq2Seq任务（T5/BLIP生成任务）
     AutoModelForCausalLM,   # Causal LM任务（LLaMA/GPT）
-    AutoModel,              # Encoder-only任务
+    AutoModel,              # Encoder-only任务（检索任务等）
     AutoProcessor,
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast
 )
-
-# 安全导入BLIP相关类（如果不存在则使用Auto类）
-try:
-    from transformers import (
-        BlipForQuestionAnswering,
-        BlipForImageTextRetrieval,
-        BlipForConditionalGeneration,
-        BlipProcessor,
-    )
-except ImportError:
-    logger = logging.getLogger(__name__)
-    logger.warning(
-        "无法导入 BLIP 相关类，将使用 AutoModelForSeq2SeqLM 作为回退。"
-        "如果需要使用 BLIP 模型，请升级 transformers 版本（>=4.30.0）"
-    )
-    # 使用 Auto 类作为回退（BLIP是Seq2Seq模型）
-    BlipForQuestionAnswering = AutoModelForSeq2SeqLM
-    BlipForImageTextRetrieval = AutoModel
-    BlipForConditionalGeneration = AutoModelForSeq2SeqLM
-    BlipProcessor = AutoProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -42,12 +23,12 @@ logger = logging.getLogger(__name__)
 class ModelLoader:
     """统一的模型加载器，支持多种模型类型"""
     
-    # 支持的模型类型映射
+    # 支持的模型类型映射（使用官方推荐的Auto类）
     MODEL_REGISTRY = {
         'blip': {
-            'vqa': BlipForQuestionAnswering,
-            'image_text_retrieval': BlipForImageTextRetrieval,
-            'conditional_generation': BlipForConditionalGeneration,
+            'vqa': AutoModelForVisualQuestionAnswering,  # 官方推荐：AutoModelForVisualQuestionAnswering
+            'image_text_retrieval': AutoModel,  # 官方推荐：AutoModel
+            'conditional_generation': AutoModelForSeq2SeqLM,  # 官方推荐：AutoModelForSeq2SeqLM
             'model_ids': [
                 'Salesforce/blip-vqa-base',
                 'Salesforce/blip-vqa-capfilt-large',
@@ -293,17 +274,16 @@ class ModelLoader:
     
     def _load_processor(self) -> Dict[str, Any]:
         """
-        加载processor，优先使用AutoProcessor（官方推荐），并验证加载的是否为正确的BLIP类
+        加载processor，使用AutoProcessor（官方推荐方式）
         
         Returns:
             包含processor, tokenizer, image_processor的字典
         """
-        logger.info("加载processor...")
+        logger.info("加载processor（使用AutoProcessor，官方推荐）...")
         
         try:
-            # 优先使用AutoProcessor（官方推荐方式）
-            # AutoProcessor会自动选择正确的processor类（如BlipProcessor）
-            from transformers import AutoProcessor
+            # 使用AutoProcessor（官方推荐方式）
+            # AutoProcessor会自动选择正确的processor类
             processor = AutoProcessor.from_pretrained(self.model_name)
             
             result = {
@@ -314,7 +294,7 @@ class ModelLoader:
             if hasattr(processor, 'image_processor'):
                 result['image_processor'] = processor.image_processor
             
-            # 验证processor类型
+            # 记录processor类型信息
             processor_type = type(processor).__name__
             logger.info(f"Processor类型: {processor_type}")
             
@@ -326,62 +306,13 @@ class ModelLoader:
                 image_processor_type = type(processor.image_processor).__name__
                 logger.info(f"ImageProcessor类型: {image_processor_type}")
             
-            # 对于BLIP模型，验证AutoProcessor是否加载了正确的BLIP类
-            if self.model_type == 'blip':
-                # 检查processor类型
-                if 'BlipProcessor' not in processor_type and 'Blip' not in processor_type:
-                    logger.warning("=" * 60)
-                    logger.warning("⚠️ 警告: BLIP模型使用了非BlipProcessor！")
-                    logger.warning(f"   实际类型: {processor_type}")
-                    logger.warning("   建议: 检查模型配置或使用BlipProcessor.from_pretrained()")
-                    logger.warning("=" * 60)
-                else:
-                    logger.info(f"✅ AutoProcessor正确加载了BLIP processor: {processor_type}")
-                
-                # 检查tokenizer类型
-                if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
-                    tokenizer_type = type(processor.tokenizer).__name__
-                    if 'BlipTokenizer' not in tokenizer_type and 'Blip' not in tokenizer_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipTokenizer！")
-                        logger.warning(f"   实际类型: {tokenizer_type}")
-                    else:
-                        logger.info(f"✅ Tokenizer类型正确: {tokenizer_type}")
-                
-                # 检查image_processor类型
-                if hasattr(processor, 'image_processor') and processor.image_processor is not None:
-                    image_processor_type = type(processor.image_processor).__name__
-                    if 'BlipImageProcessor' not in image_processor_type and 'Blip' not in image_processor_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipImageProcessor！")
-                        logger.warning(f"   实际类型: {image_processor_type}")
-                    else:
-                        logger.info(f"✅ ImageProcessor类型正确: {image_processor_type}")
-                
-                # 验证vocab_size匹配
-                if self.model is not None:
-                    self._verify_processor_model_match(processor, self.model)
-            else:
-                logger.info(f"使用AutoProcessor (模型类型: {self.model_type})")
+            # 验证vocab_size匹配（如果模型已加载）
+            if self.model is not None:
+                self._verify_processor_model_match(processor, self.model)
             
             return result
         except Exception as e:
             logger.error(f"加载processor失败: {e}")
-            if self.model_type == 'blip':
-                logger.error("⚠️⚠️⚠️ 严重警告: BLIP processor加载失败！")
-                logger.error("   这可能导致processor与模型不匹配！")
-                # 尝试使用BlipProcessor作为回退
-                try:
-                    if BlipProcessor != AutoProcessor:
-                        logger.info("尝试使用BlipProcessor作为回退...")
-                        processor = BlipProcessor.from_pretrained(self.model_name)
-                        result = {
-                            'processor': processor,
-                            'tokenizer': processor.tokenizer,
-                            'image_processor': processor.image_processor
-                        }
-                        logger.info("✅ 使用BlipProcessor回退成功")
-                        return result
-                except Exception as e2:
-                    logger.error(f"BlipProcessor回退也失败: {e2}")
             logger.warning("返回空字典")
             return {}
     

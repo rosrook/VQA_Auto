@@ -158,10 +158,10 @@ save_model(
 )
 
 # 加载模型
-from transformers import BlipForQuestionAnswering
+from transformers import AutoModelForVisualQuestionAnswering  # 官方推荐方式
 loaded_model = load_model_from_path(
     model_path="checkpoints/my_model",
-    model_class=BlipForQuestionAnswering,
+    model_class=AutoModelForVisualQuestionAnswering,  # 官方推荐方式
     device="cuda"
 )
 ```

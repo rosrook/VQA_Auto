@@ -19,19 +19,6 @@ from transformers import (
     AutoProcessor,
 )
 
-# 安全导入BLIP相关类（如果不存在则使用Auto类）
-try:
-    from transformers import BlipForQuestionAnswering, BlipProcessor
-except ImportError:
-    logger = logging.getLogger(__name__)
-    logger.warning(
-        "无法导入 BLIP 相关类，将使用 AutoModelForSeq2SeqLM 作为回退。"
-        "如果需要使用 BLIP 模型，请升级 transformers 版本（>=4.30.0）"
-    )
-    # BLIP是Seq2Seq模型，使用AutoModelForSeq2SeqLM作为回退
-    BlipForQuestionAnswering = AutoModelForSeq2SeqLM
-    BlipProcessor = AutoProcessor
-
 logger = logging.getLogger(__name__)
 
 
@@ -258,8 +245,8 @@ def load_model_from_path(
 
 
 def generate_answer_blip(
-    model: BlipForQuestionAnswering,
-    processor: BlipProcessor,
+    model: PreTrainedModel,  # 使用AutoModelForVisualQuestionAnswering（官方推荐）
+    processor: AutoProcessor,  # 使用AutoProcessor（官方推荐）
     image: Image.Image,
     question: str,
     device: Optional[str] = None,
@@ -271,8 +258,8 @@ def generate_answer_blip(
     使用BLIP模型生成答案（VQA任务）
     
     Args:
-        model: BLIP模型
-        processor: BLIP processor
+        model: VQA模型（使用AutoModelForVisualQuestionAnswering，官方推荐）
+        processor: Processor（使用AutoProcessor，官方推荐）
         image: PIL图像
         question: 问题文本
         device: 设备（如果为None，自动检测）
@@ -304,8 +291,8 @@ def generate_answer_blip(
 
 
 def generate_caption_blip(
-    model: Any,  # BlipForConditionalGeneration
-    processor: BlipProcessor,
+    model: PreTrainedModel,  # 使用AutoModelForSeq2SeqLM（官方推荐）
+    processor: AutoProcessor,  # 使用AutoProcessor（官方推荐）
     image: Image.Image,
     device: Optional[str] = None,
     max_length: int = 20,
@@ -316,8 +303,8 @@ def generate_caption_blip(
     使用BLIP模型生成图像描述
     
     Args:
-        model: BLIP生成模型
-        processor: BLIP processor
+        model: 生成模型（使用AutoModelForSeq2SeqLM，官方推荐）
+        processor: Processor（使用AutoProcessor，官方推荐）
         image: PIL图像
         device: 设备（如果为None，自动检测）
         max_length: 最大生成长度
@@ -348,7 +335,7 @@ def generate_caption_blip(
 
 
 def prepare_inputs_for_blip(
-    processor: BlipProcessor,
+    processor: AutoProcessor,  # 使用AutoProcessor（官方推荐）
     images: Union[Image.Image, List[Image.Image]],
     texts: Optional[Union[str, List[str]]] = None,
     device: Optional[str] = None
@@ -357,7 +344,7 @@ def prepare_inputs_for_blip(
     为BLIP模型准备输入
     
     Args:
-        processor: BLIP processor
+        processor: Processor（使用AutoProcessor，官方推荐）
         images: 图像或图像列表
         texts: 文本或文本列表（可选）
         device: 设备

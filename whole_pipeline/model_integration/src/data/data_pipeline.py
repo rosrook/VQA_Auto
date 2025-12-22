@@ -98,61 +98,22 @@ class DataPipeline:
         logger.info("数据管线设置完成")
     
     def _load_tokenizer(self):
-        """加载tokenizer，优先使用AutoTokenizer（官方推荐），并验证BLIP模型是否使用了正确的类"""
+        """加载tokenizer，使用AutoTokenizer（官方推荐方式）"""
         tokenizer_config = self.config.get('tokenizer', {})
         tokenizer_name = tokenizer_config.get('name', 'bert-base-uncased')
         tokenizer_type = tokenizer_config.get('type', None)  # 'blip', 'clip', 'auto'等
         
-        # 检测是否为BLIP模型
-        is_blip_model = 'blip' in tokenizer_name.lower()
+        logger.info(f"加载tokenizer: {tokenizer_name} (使用AutoTokenizer，官方推荐)")
         
-        logger.info(f"加载tokenizer: {tokenizer_name} (类型: {tokenizer_type or 'auto'})")
-        
-        # 如果用户显式指定了类型，使用指定的类
-        if tokenizer_type and tokenizer_type != 'auto':
-            try:
-                from data.data_processor import DataProcessor
-                processor_info = DataProcessor.PROCESSOR_REGISTRY.get(tokenizer_type)
-                if processor_info:
-                    tokenizer_class = processor_info['tokenizer_class']
-                    
-                    # 检查是否是BLIP且fallback到了AutoTokenizer
-                    if tokenizer_type == 'blip':
-                        if tokenizer_class == AutoTokenizer:
-                            logger.warning("=" * 60)
-                            logger.warning("⚠️ 警告: 无法导入BlipTokenizer！")
-                            logger.warning("   当前使用AutoTokenizer作为回退")
-                            logger.warning("   建议: 升级transformers版本 (>=4.30.0) 或使用AutoTokenizer")
-                            logger.warning("=" * 60)
-                        else:
-                            logger.info(f"✅ 使用BLIP专用tokenizer: {tokenizer_class.__name__}")
-                    
-                    self.tokenizer = tokenizer_class.from_pretrained(tokenizer_name)
-                    logger.info(f"成功加载 {tokenizer_type} tokenizer: {type(self.tokenizer).__name__}")
-                else:
-                    raise ValueError(f"未知的tokenizer类型: {tokenizer_type}")
-            except Exception as e:
-                logger.warning(f"使用指定类型加载tokenizer失败: {e}，回退到AutoTokenizer")
-                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-        else:
-            # 优先使用AutoTokenizer（官方推荐方式）
-            # AutoTokenizer会自动选择正确的tokenizer类（如BlipTokenizer）
-            try:
-                self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-                detected_type = type(self.tokenizer).__name__
-                logger.info(f"使用AutoTokenizer，实际类型: {detected_type}")
-                
-                # 对于BLIP模型，验证AutoTokenizer是否加载了正确的BLIP类
-                if is_blip_model:
-                    if 'BlipTokenizer' not in detected_type and 'Blip' not in detected_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipTokenizer！")
-                        logger.warning(f"   实际类型: {detected_type}")
-                        logger.warning("   建议: 检查模型配置或使用BlipTokenizer.from_pretrained()")
-                    else:
-                        logger.info(f"✅ AutoTokenizer正确加载了BLIP tokenizer: {detected_type}")
-            except Exception as e:
-                logger.error(f"加载tokenizer失败: {e}")
-                raise
+        # 如果用户显式指定了类型，仍然使用AutoTokenizer（官方推荐）
+        # AutoTokenizer会自动选择正确的tokenizer类
+        try:
+            self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+            detected_type = type(self.tokenizer).__name__
+            logger.info(f"成功加载tokenizer，类型: {detected_type}")
+        except Exception as e:
+            logger.error(f"加载tokenizer失败: {e}")
+            raise
         
         # 确保有pad token
         if self.tokenizer.pad_token is None:
@@ -164,74 +125,22 @@ class DataPipeline:
                 logger.warning("无法设置pad_token，某些模型可能需要手动设置")
     
     def _load_image_processor(self):
-        """加载图像处理器，优先使用AutoImageProcessor（官方推荐），并验证BLIP模型是否使用了正确的类"""
+        """加载图像处理器，使用AutoImageProcessor（官方推荐方式）"""
         image_processor_config = self.config.get('image_processor', {})
         processor_name = image_processor_config.get('name', 'google/vit-base-patch16-224')
         processor_type = image_processor_config.get('type', None)  # 'blip', 'clip', 'auto'等
         
-        # 检测是否为BLIP模型
-        is_blip_model = 'blip' in processor_name.lower()
+        logger.info(f"加载image processor: {processor_name} (使用AutoImageProcessor，官方推荐)")
         
-        logger.info(f"加载image processor: {processor_name} (类型: {processor_type or 'auto'})")
-        
-        # 如果用户显式指定了类型，使用指定的类
-        if processor_type and processor_type != 'auto':
-            try:
-                from data.data_processor import DataProcessor
-                processor_info = DataProcessor.PROCESSOR_REGISTRY.get(processor_type)
-                if processor_info:
-                    # 尝试加载完整的processor（包含image_processor和tokenizer）
-                    processor_class = processor_info['processor_class']
-                    
-                    # 检查是否是BLIP且fallback到了AutoProcessor
-                    if processor_type == 'blip':
-                        if processor_class == AutoProcessor:
-                            logger.warning("=" * 60)
-                            logger.warning("⚠️ 警告: 无法导入BlipProcessor！")
-                            logger.warning("   当前使用AutoProcessor作为回退")
-                            logger.warning("   建议: 升级transformers版本 (>=4.30.0) 或使用AutoProcessor")
-                            logger.warning("=" * 60)
-                        else:
-                            logger.info(f"✅ 使用BLIP专用processor: {processor_class.__name__}")
-                    
-                    try:
-                        full_processor = processor_class.from_pretrained(processor_name)
-                        self.image_processor = full_processor.image_processor if hasattr(full_processor, 'image_processor') else full_processor
-                        logger.info(f"成功加载 {processor_type} processor: {type(self.image_processor).__name__}")
-                    except:
-                        # 如果完整processor失败，尝试只加载image_processor
-                        image_processor_class = processor_info['image_processor_class']
-                        
-                        # 检查是否是BLIP且fallback到了AutoImageProcessor
-                        if processor_type == 'blip' and image_processor_class == AutoImageProcessor:
-                            logger.warning("⚠️ 警告: 无法导入BlipImageProcessor，使用AutoImageProcessor作为回退")
-                        
-                        self.image_processor = image_processor_class.from_pretrained(processor_name)
-                        logger.info(f"成功加载 {processor_type} image processor: {type(self.image_processor).__name__}")
-                else:
-                    raise ValueError(f"未知的processor类型: {processor_type}")
-            except Exception as e:
-                logger.warning(f"使用指定类型加载processor失败: {e}，回退到AutoProcessor")
-                self._load_image_processor_fallback(processor_name)
-        else:
-            # 优先使用AutoImageProcessor（官方推荐方式）
-            # AutoImageProcessor会自动选择正确的processor类（如BlipImageProcessor）
-            try:
-                self.image_processor = AutoImageProcessor.from_pretrained(processor_name)
-                detected_type = type(self.image_processor).__name__
-                logger.info(f"使用AutoImageProcessor，实际类型: {detected_type}")
-                
-                # 对于BLIP模型，验证AutoImageProcessor是否加载了正确的BLIP类
-                if is_blip_model:
-                    if 'BlipImageProcessor' not in detected_type and 'Blip' not in detected_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipImageProcessor！")
-                        logger.warning(f"   实际类型: {detected_type}")
-                        logger.warning("   建议: 检查模型配置或使用BlipImageProcessor.from_pretrained()")
-                    else:
-                        logger.info(f"✅ AutoImageProcessor正确加载了BLIP processor: {detected_type}")
-            except Exception as e:
-                logger.warning(f"AutoImageProcessor加载失败: {e}，尝试AutoProcessor")
-                self._load_image_processor_fallback(processor_name)
+        # 使用AutoImageProcessor（官方推荐方式）
+        # AutoImageProcessor会自动选择正确的processor类
+        try:
+            self.image_processor = AutoImageProcessor.from_pretrained(processor_name)
+            detected_type = type(self.image_processor).__name__
+            logger.info(f"成功加载image processor，类型: {detected_type}")
+        except Exception as e:
+            logger.warning(f"AutoImageProcessor加载失败: {e}，尝试AutoProcessor")
+            self._load_image_processor_fallback(processor_name)
     
     def _load_image_processor_fallback(self, processor_name: str):
         """回退方法：使用AutoProcessor或AutoImageProcessor"""

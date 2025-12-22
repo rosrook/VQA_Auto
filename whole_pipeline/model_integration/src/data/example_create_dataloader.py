@@ -15,12 +15,8 @@ from data.data_loader import DataLoader
 from data.data_processor import DataProcessor
 from data.dataset import VQADataset, create_dataloader
 
-# 安全导入BlipProcessor（如果不存在则使用AutoProcessor）
-try:
-    from transformers import BlipProcessor
-except ImportError:
-    from transformers import AutoProcessor as BlipProcessor
-    print("警告: 无法导入 BlipProcessor，使用 AutoProcessor 作为回退")
+# 使用AutoProcessor（官方推荐方式）
+from transformers import AutoProcessor
 
 
 def method1_using_pipeline(config_path: str):
@@ -102,9 +98,11 @@ def method2_manual_steps(
     
     # 3. 加载processor
     print(f"\n3. 加载processor: {model_name}...")
-    blip_processor = BlipProcessor.from_pretrained(model_name)
-    tokenizer = blip_processor.tokenizer
-    image_processor = blip_processor.image_processor
+    # 使用AutoProcessor（官方推荐方式）
+    # AutoProcessor会自动选择正确的processor类（如BlipProcessor）
+    auto_processor = AutoProcessor.from_pretrained(model_name)
+    tokenizer = auto_processor.tokenizer
+    image_processor = auto_processor.image_processor
     print("   ✓ Processor加载完成")
     
     # 4. 创建Dataset
