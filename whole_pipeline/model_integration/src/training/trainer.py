@@ -887,13 +887,11 @@ class Trainer:
     
     def _final_validate_before_forward(self, batch: Dict[str, Any], batch_idx: int):
         """
-        在模型forward之前进行最后的验证
+        在模型forward之前进行最后的验证和修复
         
         这是最后一道防线，确保所有数据都正确
+        对于BLIP模型，可能需要创建decoder_input_ids
         """
-        if batch_idx > 0:  # 只在第一个batch时详细检查
-            return
-        
         debug_logger = get_debug_logger()
         vocab_size = None
         text_vocab_size = None
@@ -903,56 +901,108 @@ class Trainer:
                 text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
         effective_vocab_size = text_vocab_size or vocab_size
         
+        # 检查是否是BLIP模型
+        is_blip = False
+        model_name = str(type(self.model).__name__).lower()
+        if 'blip' in model_name or (hasattr(self.model, 'config') and 'blip' in str(self.model.config).lower()):
+            is_blip = True
+        
+        if batch_idx == 0:  # 只在第一个batch时详细检查
+            debug_logger.info("=" * 60)
+            debug_logger.info("🔍 模型forward前的最后验证...")
+            debug_logger.info(f"   模型类型: {model_name}, 是否BLIP: {is_blip}")
+        
+        # 对于BLIP模型，检查是否需要decoder_input_ids
+        if is_blip and 'decoder_input_ids' not in batch and 'labels' in batch:
+            labels = batch['labels']
+            if isinstance(labels, torch.Tensor):
+                # BLIP模型通常需要decoder_input_ids，从labels创建
+                # decoder_input_ids是labels向右shift一位，第一个token是bos_token_id
+                try:
+                    bos_token_id = getattr(self.model.config, 'bos_token_id', None)
+                    if bos_token_id is None:
+                        bos_token_id = getattr(self.model.config, 'decoder_start_token_id', None)
+                    if bos_token_id is None:
+                        bos_token_id = 0  # 默认值
+                    
+                    # 创建decoder_input_ids: [bos_token_id, label[0], label[1], ..., label[n-1]]
+                    decoder_input_ids = labels.clone()
+                    # 将第一个位置设置为bos_token_id，其余位置shift
+                    decoder_input_ids[:, 1:] = labels[:, :-1]
+                    decoder_input_ids[:, 0] = bos_token_id
+                    
+                    batch['decoder_input_ids'] = decoder_input_ids
+                    if batch_idx == 0:
+                        debug_logger.info(f"   ✅ 为BLIP模型创建了decoder_input_ids (bos_token_id={bos_token_id})")
+                except Exception as e:
+                    if batch_idx == 0:
+                        debug_logger.warning(f"   无法创建decoder_input_ids: {e}")
+        
         if not effective_vocab_size:
+            if batch_idx == 0:
+                debug_logger.info("=" * 60)
             return
         
-        debug_logger.info("=" * 60)
-        debug_logger.info("🔍 模型forward前的最后验证...")
-        
-        for key in ['input_ids', 'labels', 'decoder_input_ids']:
+        # 在CPU上最后验证和修复所有tensor（在移动到GPU之前）
+        for key in ['input_ids', 'labels', 'decoder_input_ids', 'decoder_attention_mask']:
             if key in batch and isinstance(batch[key], torch.Tensor):
                 tensor = batch[key]
                 try:
-                    # 尝试在GPU上检查（如果可能）
+                    # 移动到CPU检查
                     if tensor.is_cuda:
-                        # 对于CUDA tensor，先尝试在GPU上检查
-                        try:
-                            max_val = tensor.max().item()
-                            min_val = tensor.min().item()
-                            
-                            if key == 'labels':
-                                valid_tensor = tensor[tensor != -100]
-                                if len(valid_tensor) > 0:
-                                    max_valid = valid_tensor.max().item()
-                                    min_valid = valid_tensor.min().item()
-                                    
-                                    if max_valid >= effective_vocab_size or min_valid < 0:
-                                        debug_logger.error(
-                                            f"❌ {key}在GPU上仍有非法值: [{min_valid}, {max_valid}] vs vocab_size={effective_vocab_size}"
-                                        )
-                                        # 尝试修复
-                                        invalid_mask = (tensor != -100) & ((tensor < 0) | (tensor >= effective_vocab_size))
-                                        tensor[invalid_mask] = -100
-                                        debug_logger.warning(f"   已修复{key}的非法值")
-                                    else:
-                                        debug_logger.info(f"   ✅ {key}值正常: [{min_valid}, {max_valid}]")
-                            else:
-                                if max_val >= effective_vocab_size or min_val < 0:
-                                    debug_logger.error(
-                                        f"❌ {key}在GPU上仍有非法值: [{min_val}, {max_val}] vs vocab_size={effective_vocab_size}"
-                                    )
-                                    # 尝试修复
-                                    tensor = torch.clamp(tensor, 0, effective_vocab_size - 1)
-                                    batch[key] = tensor
-                                    debug_logger.warning(f"   已修复{key}的非法值")
-                                else:
-                                    debug_logger.info(f"   ✅ {key}值正常: [{min_val}, {max_val}]")
-                        except RuntimeError as e:
-                            debug_logger.warning(f"   无法在GPU上检查{key}: {e}")
+                        tensor_cpu = tensor.cpu()
+                    else:
+                        tensor_cpu = tensor.clone()
+                    
+                    if key == 'labels':
+                        # 检查labels中的非法值
+                        if effective_vocab_size:
+                            invalid_mask = (tensor_cpu != -100) & ((tensor_cpu < 0) | (tensor_cpu >= effective_vocab_size))
+                            if invalid_mask.any():
+                                invalid_count = invalid_mask.sum().item()
+                                if batch_idx == 0:
+                                    debug_logger.error(f"❌ {key}在GPU上有 {invalid_count} 个非法值，修复中...")
+                                # 修复
+                                tensor_cpu[invalid_mask] = -100
+                                batch[key] = tensor_cpu.to(tensor.device)
+                                if batch_idx == 0:
+                                    debug_logger.warning(f"   ✅ 已修复{key}的非法值")
+                            elif batch_idx == 0:
+                                valid_labels = tensor_cpu[tensor_cpu != -100]
+                                if len(valid_labels) > 0:
+                                    debug_logger.info(f"   ✅ {key}值正常: [{valid_labels.min().item()}, {valid_labels.max().item()}]")
+                    elif 'id' in key.lower():
+                        # input_ids或decoder_input_ids
+                        if effective_vocab_size:
+                            invalid_mask = (tensor_cpu < 0) | (tensor_cpu >= effective_vocab_size)
+                            if invalid_mask.any():
+                                invalid_count = invalid_mask.sum().item()
+                                if batch_idx == 0:
+                                    debug_logger.error(f"❌ {key}在GPU上有 {invalid_count} 个非法值，修复中...")
+                                # 修复
+                                tensor_cpu = torch.clamp(tensor_cpu, 0, effective_vocab_size - 1)
+                                batch[key] = tensor_cpu.to(tensor.device)
+                                if batch_idx == 0:
+                                    debug_logger.warning(f"   ✅ 已修复{key}的非法值")
+                            elif batch_idx == 0:
+                                debug_logger.info(f"   ✅ {key}值正常: [{tensor_cpu.min().item()}, {tensor_cpu.max().item()}]")
+                    elif 'mask' in key.lower():
+                        # attention_mask
+                        unique_values = tensor_cpu.unique()
+                        invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+                        if len(invalid_values) > 0:
+                            if batch_idx == 0:
+                                debug_logger.error(f"❌ {key}包含非法值，修复中...")
+                            tensor_cpu = torch.clamp(tensor_cpu, 0, 1).long()
+                            batch[key] = tensor_cpu.to(tensor.device)
+                            if batch_idx == 0:
+                                debug_logger.warning(f"   ✅ 已修复{key}的非法值")
                 except Exception as e:
-                    debug_logger.warning(f"   检查{key}时出错: {e}")
+                    if batch_idx == 0:
+                        debug_logger.warning(f"   检查{key}时出错: {e}")
         
-        debug_logger.info("=" * 60)
+        if batch_idx == 0:
+            debug_logger.info("=" * 60)
     
     def _validate_batch_on_device(self, batch: Dict[str, Any], batch_idx: int):
         """
