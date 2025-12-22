@@ -98,21 +98,17 @@ class DataPipeline:
         logger.info("数据管线设置完成")
     
     def _load_tokenizer(self):
-        """加载tokenizer，支持多种类型（BLIP、CLIP等），强制使用BLIP专用类"""
+        """加载tokenizer，优先使用AutoTokenizer（官方推荐），并验证BLIP模型是否使用了正确的类"""
         tokenizer_config = self.config.get('tokenizer', {})
         tokenizer_name = tokenizer_config.get('name', 'bert-base-uncased')
         tokenizer_type = tokenizer_config.get('type', None)  # 'blip', 'clip', 'auto'等
         
-        # 自动检测模型类型（如果未指定）
-        if tokenizer_type is None:
-            tokenizer_name_lower = tokenizer_name.lower()
-            if 'blip' in tokenizer_name_lower:
-                tokenizer_type = 'blip'
-                logger.info(f"自动检测到BLIP模型，将使用BlipTokenizer")
+        # 检测是否为BLIP模型
+        is_blip_model = 'blip' in tokenizer_name.lower()
         
         logger.info(f"加载tokenizer: {tokenizer_name} (类型: {tokenizer_type or 'auto'})")
         
-        # 如果指定了类型，使用DataProcessor来加载
+        # 如果用户显式指定了类型，使用指定的类
         if tokenizer_type and tokenizer_type != 'auto':
             try:
                 from data.data_processor import DataProcessor
@@ -123,11 +119,11 @@ class DataPipeline:
                     # 检查是否是BLIP且fallback到了AutoTokenizer
                     if tokenizer_type == 'blip':
                         if tokenizer_class == AutoTokenizer:
-                            logger.error("=" * 60)
-                            logger.error("⚠️⚠️⚠️ 严重警告: 无法导入BlipTokenizer！")
-                            logger.error("   当前使用AutoTokenizer作为回退，这可能导致不匹配问题！")
-                            logger.error("   建议: 升级transformers版本 (>=4.30.0) 或检查安装")
-                            logger.error("=" * 60)
+                            logger.warning("=" * 60)
+                            logger.warning("⚠️ 警告: 无法导入BlipTokenizer！")
+                            logger.warning("   当前使用AutoTokenizer作为回退")
+                            logger.warning("   建议: 升级transformers版本 (>=4.30.0) 或使用AutoTokenizer")
+                            logger.warning("=" * 60)
                         else:
                             logger.info(f"✅ 使用BLIP专用tokenizer: {tokenizer_class.__name__}")
                     
@@ -136,33 +132,27 @@ class DataPipeline:
                 else:
                     raise ValueError(f"未知的tokenizer类型: {tokenizer_type}")
             except Exception as e:
-                logger.error(f"使用指定类型加载tokenizer失败: {e}")
-                if tokenizer_type == 'blip':
-                    logger.error("⚠️⚠️⚠️ 严重警告: BLIP tokenizer加载失败！")
-                    logger.error("   这可能导致tokenizer与模型不匹配！")
-                logger.warning(f"回退到AutoTokenizer")
+                logger.warning(f"使用指定类型加载tokenizer失败: {e}，回退到AutoTokenizer")
                 self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
         else:
-            # 自动检测或使用AutoTokenizer
+            # 优先使用AutoTokenizer（官方推荐方式）
+            # AutoTokenizer会自动选择正确的tokenizer类（如BlipTokenizer）
             try:
-                # 尝试使用DataProcessor自动检测
-                from data.data_processor import DataProcessor
-                temp_processor = DataProcessor({'processor_name': tokenizer_name})
-                if temp_processor.tokenizer:
-                    self.tokenizer = temp_processor.tokenizer
-                    detected_type = type(self.tokenizer).__name__
-                    logger.info(f"自动检测到tokenizer: {detected_type}")
-                    
-                    # 检查BLIP模型是否使用了正确的tokenizer
-                    if 'blip' in tokenizer_name.lower() and 'BlipTokenizer' not in detected_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipTokenizer，可能存在不匹配风险")
-                else:
-                    # 回退到AutoTokenizer
-                    self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-                    logger.info("使用AutoTokenizer")
-            except Exception as e:
-                logger.warning(f"自动检测失败: {e}，使用AutoTokenizer")
                 self.tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+                detected_type = type(self.tokenizer).__name__
+                logger.info(f"使用AutoTokenizer，实际类型: {detected_type}")
+                
+                # 对于BLIP模型，验证AutoTokenizer是否加载了正确的BLIP类
+                if is_blip_model:
+                    if 'BlipTokenizer' not in detected_type and 'Blip' not in detected_type:
+                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipTokenizer！")
+                        logger.warning(f"   实际类型: {detected_type}")
+                        logger.warning("   建议: 检查模型配置或使用BlipTokenizer.from_pretrained()")
+                    else:
+                        logger.info(f"✅ AutoTokenizer正确加载了BLIP tokenizer: {detected_type}")
+            except Exception as e:
+                logger.error(f"加载tokenizer失败: {e}")
+                raise
         
         # 确保有pad token
         if self.tokenizer.pad_token is None:
@@ -174,21 +164,17 @@ class DataPipeline:
                 logger.warning("无法设置pad_token，某些模型可能需要手动设置")
     
     def _load_image_processor(self):
-        """加载图像处理器，支持多种类型（BLIP、CLIP等），强制使用BLIP专用类"""
+        """加载图像处理器，优先使用AutoImageProcessor（官方推荐），并验证BLIP模型是否使用了正确的类"""
         image_processor_config = self.config.get('image_processor', {})
         processor_name = image_processor_config.get('name', 'google/vit-base-patch16-224')
         processor_type = image_processor_config.get('type', None)  # 'blip', 'clip', 'auto'等
         
-        # 自动检测模型类型（如果未指定）
-        if processor_type is None:
-            processor_name_lower = processor_name.lower()
-            if 'blip' in processor_name_lower:
-                processor_type = 'blip'
-                logger.info(f"自动检测到BLIP模型，将使用BlipImageProcessor")
+        # 检测是否为BLIP模型
+        is_blip_model = 'blip' in processor_name.lower()
         
         logger.info(f"加载image processor: {processor_name} (类型: {processor_type or 'auto'})")
         
-        # 如果指定了类型，使用DataProcessor来加载
+        # 如果用户显式指定了类型，使用指定的类
         if processor_type and processor_type != 'auto':
             try:
                 from data.data_processor import DataProcessor
@@ -200,11 +186,11 @@ class DataPipeline:
                     # 检查是否是BLIP且fallback到了AutoProcessor
                     if processor_type == 'blip':
                         if processor_class == AutoProcessor:
-                            logger.error("=" * 60)
-                            logger.error("⚠️⚠️⚠️ 严重警告: 无法导入BlipProcessor！")
-                            logger.error("   当前使用AutoProcessor作为回退，这可能导致不匹配问题！")
-                            logger.error("   建议: 升级transformers版本 (>=4.30.0) 或检查安装")
-                            logger.error("=" * 60)
+                            logger.warning("=" * 60)
+                            logger.warning("⚠️ 警告: 无法导入BlipProcessor！")
+                            logger.warning("   当前使用AutoProcessor作为回退")
+                            logger.warning("   建议: 升级transformers版本 (>=4.30.0) 或使用AutoProcessor")
+                            logger.warning("=" * 60)
                         else:
                             logger.info(f"✅ 使用BLIP专用processor: {processor_class.__name__}")
                     
@@ -218,49 +204,33 @@ class DataPipeline:
                         
                         # 检查是否是BLIP且fallback到了AutoImageProcessor
                         if processor_type == 'blip' and image_processor_class == AutoImageProcessor:
-                            logger.error("=" * 60)
-                            logger.error("⚠️⚠️⚠️ 严重警告: 无法导入BlipImageProcessor！")
-                            logger.error("   当前使用AutoImageProcessor作为回退，这可能导致不匹配问题！")
-                            logger.error("=" * 60)
+                            logger.warning("⚠️ 警告: 无法导入BlipImageProcessor，使用AutoImageProcessor作为回退")
                         
                         self.image_processor = image_processor_class.from_pretrained(processor_name)
                         logger.info(f"成功加载 {processor_type} image processor: {type(self.image_processor).__name__}")
                 else:
                     raise ValueError(f"未知的processor类型: {processor_type}")
             except Exception as e:
-                logger.error(f"使用指定类型加载processor失败: {e}")
-                if processor_type == 'blip':
-                    logger.error("⚠️⚠️⚠️ 严重警告: BLIP processor加载失败！")
-                    logger.error("   这可能导致processor与模型不匹配！")
-                logger.warning(f"回退到AutoProcessor")
+                logger.warning(f"使用指定类型加载processor失败: {e}，回退到AutoProcessor")
                 self._load_image_processor_fallback(processor_name)
         else:
-            # 自动检测或使用AutoProcessor
+            # 优先使用AutoImageProcessor（官方推荐方式）
+            # AutoImageProcessor会自动选择正确的processor类（如BlipImageProcessor）
             try:
-                # 尝试使用DataProcessor自动检测
-                from data.data_processor import DataProcessor
-                temp_processor = DataProcessor({'processor_name': processor_name})
-                if temp_processor.image_processor:
-                    self.image_processor = temp_processor.image_processor
-                    detected_type = type(self.image_processor).__name__
-                    logger.info(f"自动检测到image processor: {detected_type}")
-                    
-                    # 检查BLIP模型是否使用了正确的processor
-                    if 'blip' in processor_name.lower() and 'BlipImageProcessor' not in detected_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipImageProcessor，可能存在不匹配风险")
-                elif temp_processor.processor and hasattr(temp_processor.processor, 'image_processor'):
-                    self.image_processor = temp_processor.processor.image_processor
-                    detected_type = type(self.image_processor).__name__
-                    logger.info(f"自动检测到processor: {detected_type}")
-                    
-                    # 检查BLIP模型是否使用了正确的processor
-                    if 'blip' in processor_name.lower() and 'Blip' not in detected_type:
-                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipProcessor，可能存在不匹配风险")
-                else:
-                    # 回退到AutoProcessor
-                    self._load_image_processor_fallback(processor_name)
+                self.image_processor = AutoImageProcessor.from_pretrained(processor_name)
+                detected_type = type(self.image_processor).__name__
+                logger.info(f"使用AutoImageProcessor，实际类型: {detected_type}")
+                
+                # 对于BLIP模型，验证AutoImageProcessor是否加载了正确的BLIP类
+                if is_blip_model:
+                    if 'BlipImageProcessor' not in detected_type and 'Blip' not in detected_type:
+                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipImageProcessor！")
+                        logger.warning(f"   实际类型: {detected_type}")
+                        logger.warning("   建议: 检查模型配置或使用BlipImageProcessor.from_pretrained()")
+                    else:
+                        logger.info(f"✅ AutoImageProcessor正确加载了BLIP processor: {detected_type}")
             except Exception as e:
-                logger.warning(f"自动检测失败: {e}，使用AutoProcessor")
+                logger.warning(f"AutoImageProcessor加载失败: {e}，尝试AutoProcessor")
                 self._load_image_processor_fallback(processor_name)
     
     def _load_image_processor_fallback(self, processor_name: str):

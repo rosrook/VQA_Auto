@@ -293,7 +293,7 @@ class ModelLoader:
     
     def _load_processor(self) -> Dict[str, Any]:
         """
-        加载processor，强制使用BLIP专用类并检测不匹配
+        加载processor，优先使用AutoProcessor（官方推荐），并验证加载的是否为正确的BLIP类
         
         Returns:
             包含processor, tokenizer, image_processor的字典
@@ -301,62 +301,66 @@ class ModelLoader:
         logger.info("加载processor...")
         
         try:
-            # 尝试加载完整的processor
-            if self.model_type == 'blip':
-                # 检查BlipProcessor是否可用
-                if BlipProcessor == AutoProcessor:
-                    logger.error("=" * 60)
-                    logger.error("⚠️⚠️⚠️ 严重警告: 无法导入BlipProcessor！")
-                    logger.error("   当前使用AutoProcessor作为回退，这可能导致不匹配问题！")
-                    logger.error("   建议: 升级transformers版本 (>=4.30.0) 或检查安装")
-                    logger.error("=" * 60)
-                else:
-                    logger.info("✅ 使用BLIP专用processor: BlipProcessor")
-                
-                processor = BlipProcessor.from_pretrained(self.model_name)
-                result = {
-                    'processor': processor,
-                    'tokenizer': processor.tokenizer,
-                    'image_processor': processor.image_processor
-                }
-                
-                # 验证processor类型
-                processor_type = type(processor).__name__
+            # 优先使用AutoProcessor（官方推荐方式）
+            # AutoProcessor会自动选择正确的processor类（如BlipProcessor）
+            from transformers import AutoProcessor
+            processor = AutoProcessor.from_pretrained(self.model_name)
+            
+            result = {
+                'processor': processor,
+            }
+            if hasattr(processor, 'tokenizer'):
+                result['tokenizer'] = processor.tokenizer
+            if hasattr(processor, 'image_processor'):
+                result['image_processor'] = processor.image_processor
+            
+            # 验证processor类型
+            processor_type = type(processor).__name__
+            logger.info(f"Processor类型: {processor_type}")
+            
+            if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
                 tokenizer_type = type(processor.tokenizer).__name__
-                image_processor_type = type(processor.image_processor).__name__
-                
-                logger.info(f"Processor类型: {processor_type}")
                 logger.info(f"Tokenizer类型: {tokenizer_type}")
+            
+            if hasattr(processor, 'image_processor') and processor.image_processor is not None:
+                image_processor_type = type(processor.image_processor).__name__
                 logger.info(f"ImageProcessor类型: {image_processor_type}")
+            
+            # 对于BLIP模型，验证AutoProcessor是否加载了正确的BLIP类
+            if self.model_type == 'blip':
+                # 检查processor类型
+                if 'BlipProcessor' not in processor_type and 'Blip' not in processor_type:
+                    logger.warning("=" * 60)
+                    logger.warning("⚠️ 警告: BLIP模型使用了非BlipProcessor！")
+                    logger.warning(f"   实际类型: {processor_type}")
+                    logger.warning("   建议: 检查模型配置或使用BlipProcessor.from_pretrained()")
+                    logger.warning("=" * 60)
+                else:
+                    logger.info(f"✅ AutoProcessor正确加载了BLIP processor: {processor_type}")
                 
-                # 检查是否使用了正确的BLIP类
-                if 'BlipProcessor' not in processor_type:
-                    logger.error("⚠️⚠️⚠️ 严重警告: processor不是BlipProcessor类型！")
-                    logger.error(f"   实际类型: {processor_type}")
+                # 检查tokenizer类型
+                if hasattr(processor, 'tokenizer') and processor.tokenizer is not None:
+                    tokenizer_type = type(processor.tokenizer).__name__
+                    if 'BlipTokenizer' not in tokenizer_type and 'Blip' not in tokenizer_type:
+                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipTokenizer！")
+                        logger.warning(f"   实际类型: {tokenizer_type}")
+                    else:
+                        logger.info(f"✅ Tokenizer类型正确: {tokenizer_type}")
                 
-                if 'BlipTokenizer' not in tokenizer_type:
-                    logger.error("⚠️⚠️⚠️ 严重警告: tokenizer不是BlipTokenizer类型！")
-                    logger.error(f"   实际类型: {tokenizer_type}")
-                
-                if 'BlipImageProcessor' not in image_processor_type:
-                    logger.error("⚠️⚠️⚠️ 严重警告: image_processor不是BlipImageProcessor类型！")
-                    logger.error(f"   实际类型: {image_processor_type}")
+                # 检查image_processor类型
+                if hasattr(processor, 'image_processor') and processor.image_processor is not None:
+                    image_processor_type = type(processor.image_processor).__name__
+                    if 'BlipImageProcessor' not in image_processor_type and 'Blip' not in image_processor_type:
+                        logger.warning("⚠️ 警告: BLIP模型使用了非BlipImageProcessor！")
+                        logger.warning(f"   实际类型: {image_processor_type}")
+                    else:
+                        logger.info(f"✅ ImageProcessor类型正确: {image_processor_type}")
                 
                 # 验证vocab_size匹配
                 if self.model is not None:
                     self._verify_processor_model_match(processor, self.model)
             else:
-                # 使用AutoProcessor
-                from transformers import AutoProcessor
-                processor = AutoProcessor.from_pretrained(self.model_name)
-                result = {
-                    'processor': processor,
-                }
-                if hasattr(processor, 'tokenizer'):
-                    result['tokenizer'] = processor.tokenizer
-                if hasattr(processor, 'image_processor'):
-                    result['image_processor'] = processor.image_processor
-                logger.info("使用AutoProcessor")
+                logger.info(f"使用AutoProcessor (模型类型: {self.model_type})")
             
             return result
         except Exception as e:
@@ -364,6 +368,20 @@ class ModelLoader:
             if self.model_type == 'blip':
                 logger.error("⚠️⚠️⚠️ 严重警告: BLIP processor加载失败！")
                 logger.error("   这可能导致processor与模型不匹配！")
+                # 尝试使用BlipProcessor作为回退
+                try:
+                    if BlipProcessor != AutoProcessor:
+                        logger.info("尝试使用BlipProcessor作为回退...")
+                        processor = BlipProcessor.from_pretrained(self.model_name)
+                        result = {
+                            'processor': processor,
+                            'tokenizer': processor.tokenizer,
+                            'image_processor': processor.image_processor
+                        }
+                        logger.info("✅ 使用BlipProcessor回退成功")
+                        return result
+                except Exception as e2:
+                    logger.error(f"BlipProcessor回退也失败: {e2}")
             logger.warning("返回空字典")
             return {}
     
