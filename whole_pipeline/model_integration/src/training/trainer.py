@@ -563,48 +563,48 @@ class Trainer:
             # ===== 关键：处理 decoder_attention_mask =====
             if 'decoder_attention_mask' in batch:
                 decoder_attention_mask = batch['decoder_attention_mask']
-                    if isinstance(decoder_attention_mask, torch.Tensor):
-                        decoder_attention_mask_cpu = decoder_attention_mask.cpu()
-                        unique_values = torch.unique(decoder_attention_mask_cpu)
-                        debug_logger = get_debug_logger()
-                        if not all(v in [0, 1] for v in unique_values.tolist()):
-                            debug_logger.warning(f"decoder_attention_mask包含非法值，修复中...")
-                            decoder_attention_mask = torch.clamp(decoder_attention_mask_cpu, 0, 1).long()
-                        prepared_batch['decoder_attention_mask'] = decoder_attention_mask.to(self.device)
+                if isinstance(decoder_attention_mask, torch.Tensor):
+                    decoder_attention_mask_cpu = decoder_attention_mask.cpu()
+                    unique_values = torch.unique(decoder_attention_mask_cpu)
+                    debug_logger = get_debug_logger()
+                    if not all(v in [0, 1] for v in unique_values.tolist()):
+                        debug_logger.warning(f"decoder_attention_mask包含非法值，修复中...")
+                        decoder_attention_mask = torch.clamp(decoder_attention_mask_cpu, 0, 1).long()
+                    prepared_batch['decoder_attention_mask'] = decoder_attention_mask.to(self.device)
             
             # 处理 labels
             if 'labels' in batch:
                 labels = batch['labels']
-                    if isinstance(labels, torch.Tensor):
-                        debug_logger = get_debug_logger()
-                        if labels.shape != input_ids.shape:
-                            debug_logger.warning(f"labels shape {labels.shape} 与 input_ids shape {input_ids.shape} 不匹配")
-                            if labels.dim() == 1 and len(labels) == seq_len:
-                                labels = labels.unsqueeze(0).expand(batch_size, -1)
-                            elif labels.dim() == 2 and labels.size(0) == batch_size and labels.size(1) != seq_len:
-                                # 对于BLIP，labels可能是answer的token ids，长度可能不同
-                                debug_logger.info(f"labels长度与input_ids不同，这对BLIP是正常的")
+                if isinstance(labels, torch.Tensor):
+                    debug_logger = get_debug_logger()
+                    if labels.shape != input_ids.shape:
+                        debug_logger.warning(f"labels shape {labels.shape} 与 input_ids shape {input_ids.shape} 不匹配")
+                        if labels.dim() == 1 and len(labels) == seq_len:
+                            labels = labels.unsqueeze(0).expand(batch_size, -1)
+                        elif labels.dim() == 2 and labels.size(0) == batch_size and labels.size(1) != seq_len:
+                            # 对于BLIP，labels可能是answer的token ids，长度可能不同
+                            debug_logger.info(f"labels长度与input_ids不同，这对BLIP是正常的")
+                    
+                    # 验证labels值（在CPU上）
+                    labels_cpu = labels.cpu()
+                    valid_labels = labels_cpu[labels_cpu != -100]
+                    if len(valid_labels) > 0:
+                        max_label = valid_labels.max().item()
+                        min_label = valid_labels.min().item()
                         
-                        # 验证labels值（在CPU上）
-                        labels_cpu = labels.cpu()
-                        valid_labels = labels_cpu[labels_cpu != -100]
-                        if len(valid_labels) > 0:
-                            max_label = valid_labels.max().item()
-                            min_label = valid_labels.min().item()
-                            
-                            debug_logger.info(f"📊 labels统计: min={min_label}, max={max_label} (忽略-100)")
-                            
-                            if effective_vocab_size is not None:
-                                if max_label >= effective_vocab_size or min_label < 0:
-                                    debug_logger.error(f"❌ labels超出范围: [{min_label}, {max_label}] vs [0, {effective_vocab_size-1}]")
-                                    debug_logger.warning(f"   🔧 将非法labels设置为-100...")
-                                    
-                                    # 创建mask并替换
-                                    mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
-                                    labels_cpu[mask] = -100
-                                    labels = labels_cpu
-                                    
-                                    debug_logger.info(f"   ✅ labels修复完成")
+                        debug_logger.info(f"📊 labels统计: min={min_label}, max={max_label} (忽略-100)")
+                        
+                        if effective_vocab_size is not None:
+                            if max_label >= effective_vocab_size or min_label < 0:
+                                debug_logger.error(f"❌ labels超出范围: [{min_label}, {max_label}] vs [0, {effective_vocab_size-1}]")
+                                debug_logger.warning(f"   🔧 将非法labels设置为-100...")
+                                
+                                # 创建mask并替换
+                                mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
+                                labels_cpu[mask] = -100
+                                labels = labels_cpu
+                                
+                                debug_logger.info(f"   ✅ labels修复完成")
                     
                     prepared_batch['labels'] = labels.to(self.device)
         
