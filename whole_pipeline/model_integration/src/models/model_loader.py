@@ -236,7 +236,11 @@ class ModelLoader:
         if 'torch_dtype' in load_kwargs:
             safe_kwargs['torch_dtype'] = load_kwargs['torch_dtype']
         elif self.device == 'cuda':
-            safe_kwargs['torch_dtype'] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+            # 默认使用float16而不是bfloat16，因为GradScaler不支持bfloat16
+            # 如果需要bfloat16，可以在load_kwargs中显式指定
+            safe_kwargs['torch_dtype'] = torch.float16
+            # 如果用户明确需要bfloat16，可以使用下面的代码
+            # safe_kwargs['torch_dtype'] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         
         # 设备映射
         if self.device == 'cuda' and 'device_map' in load_kwargs:

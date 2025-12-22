@@ -148,17 +148,36 @@ class Trainer:
         self.history = []
         
         # 混合精度训练
+        # 检查模型dtype：如果模型是bfloat16，GradScaler不支持，需要禁用AMP或使用FP16
+        model_dtype = None
+        if hasattr(model, 'dtype'):
+            model_dtype = model.dtype
+        elif hasattr(model, 'config') and hasattr(model.config, 'torch_dtype'):
+            model_dtype = model.config.torch_dtype
+        
         if self.fp16:
             try:
                 from torch.cuda.amp import autocast, GradScaler
-                self.scaler = GradScaler()
-                self.use_amp = True
-                logger.info("启用混合精度训练（FP16）")
+                
+                # 检查模型是否使用bfloat16
+                if model_dtype == torch.bfloat16:
+                    logger.warning(
+                        "⚠️  模型使用bfloat16，但GradScaler不支持bfloat16。"
+                        "将禁用混合精度训练，或考虑使用float16加载模型。"
+                    )
+                    self.use_amp = False
+                    self.scaler = None
+                else:
+                    self.scaler = GradScaler()
+                    self.use_amp = True
+                    logger.info("启用混合精度训练（FP16）")
             except ImportError:
                 logger.warning("无法启用混合精度训练，需要CUDA支持")
                 self.use_amp = False
+                self.scaler = None
         else:
             self.use_amp = False
+            self.scaler = None
         
         # 创建保存目录
         Path(self.save_dir).mkdir(parents=True, exist_ok=True)
@@ -402,11 +421,19 @@ class Trainer:
         
         # 前向传播
         try:
-            if self.use_amp:
-                with torch.cuda.amp.autocast():
-                    outputs = self.model(**batch)
-                    loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
-                    loss = loss / self.gradient_accumulation_steps
+            if self.use_amp and self.scaler is not None:
+                # 使用新的API（推荐，避免FutureWarning）
+                try:
+                    with torch.amp.autocast('cuda'):
+                        outputs = self.model(**batch)
+                        loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
+                        loss = loss / self.gradient_accumulation_steps
+                except AttributeError:
+                    # 回退到旧API（兼容旧版本PyTorch）
+                    with torch.cuda.amp.autocast():
+                        outputs = self.model(**batch)
+                        loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
+                        loss = loss / self.gradient_accumulation_steps
             else:
                 outputs = self.model(**batch)
                 loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
@@ -493,7 +520,7 @@ class Trainer:
             raise
         
         # 反向传播
-        if self.use_amp:
+        if self.use_amp and self.scaler is not None:
             self.scaler.scale(loss).backward()
         else:
             loss.backward()
@@ -502,7 +529,7 @@ class Trainer:
         if (self.global_step + 1) % self.gradient_accumulation_steps == 0:
             # 梯度裁剪
             if self.max_grad_norm is not None:
-                if self.use_amp:
+                if self.use_amp and self.scaler is not None:
                     self.scaler.unscale_(self.optimizer)
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                     self.scaler.step(self.optimizer)
@@ -511,7 +538,7 @@ class Trainer:
                     torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.max_grad_norm)
                     self.optimizer.step()
             else:
-                if self.use_amp:
+                if self.use_amp and self.scaler is not None:
                     self.scaler.step(self.optimizer)
                     self.scaler.update()
                 else:
