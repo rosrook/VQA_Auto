@@ -13,8 +13,33 @@ import base64
 from io import BytesIO
 import requests
 import warnings
+import os
+import threading
 
 logger = logging.getLogger(__name__)
+
+# 调试选项：设置环境变量 DATA_DEBUG_SAVE_FIRST_N 保存前 N 张原始图像
+DEBUG_SAVE_REMAINING = int(os.environ.get("DATA_DEBUG_SAVE_FIRST_N", "0") or 0)
+DEBUG_SAVE_DIR = Path(os.environ.get("DATA_DEBUG_SAVE_DIR", "debug_images"))
+_DEBUG_LOCK = threading.Lock()
+
+
+def _save_debug_image(image: Image.Image, prefix: str, idx: int):
+    """可选：保存前 N 张原始图像以便检查解码是否正确"""
+    global DEBUG_SAVE_REMAINING
+    if DEBUG_SAVE_REMAINING <= 0:
+        return
+    with _DEBUG_LOCK:
+        if DEBUG_SAVE_REMAINING <= 0:
+            return
+        try:
+            DEBUG_SAVE_DIR.mkdir(parents=True, exist_ok=True)
+            filename = DEBUG_SAVE_DIR / f"{prefix}_{idx}.jpg"
+            image.save(filename, format="JPEG")
+            DEBUG_SAVE_REMAINING -= 1
+            logger.info(f"[DEBUG] 保存调试图像: {filename}")
+        except Exception as e:
+            logger.warning(f"[DEBUG] 保存调试图像失败: {e}")
 
 
 class ImageProcessor:
@@ -306,6 +331,9 @@ class VQADataset(Dataset):
             # 创建空白图像作为fallback
             image = Image.new('RGB', (224, 224), color='white')
         
+        # 调试：保存前N张原始图像
+        _save_debug_image(image, prefix="vqa_raw", idx=idx)
+        
         # 2. 处理图像
         pixel_values = self._process_image(image)
         
@@ -466,6 +494,9 @@ class ImageCaptioningDataset(Dataset):
             )
             logger.error(error_msg)
             image = Image.new('RGB', (224, 224), color='white')
+        
+        # 调试：保存前N张原始图像
+        _save_debug_image(image, prefix="caption_raw", idx=idx)
         
         # 2. 处理图像
         pixel_values = self._process_image(image)

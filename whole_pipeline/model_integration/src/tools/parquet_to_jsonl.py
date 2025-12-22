@@ -21,6 +21,7 @@
 """
 import argparse
 import json
+import base64
 from pathlib import Path
 from typing import List, Optional, Dict, Any
 
@@ -40,25 +41,68 @@ def is_base64_image(s: Optional[str]) -> bool:
     if not s or not isinstance(s, str):
         return False
     s_strip = s.strip()
-    return s_strip.startswith("data:image")
+    if s_strip.startswith("data:image"):
+        return True
+    # 简单检测是否为纯base64（长度>20且仅包含base64字符）
+    base64_chars = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/=")
+    s_clean = s_strip.replace("\n", "").replace("\r", "").replace(" ", "")
+    if len(s_clean) > 20 and all(c in base64_chars for c in s_clean):
+        try:
+            base64.b64decode(s_clean, validate=True)
+            return True
+        except Exception:
+            return False
+    return False
 
 
-def normalize_image(b64: Optional[str]) -> Optional[str]:
-    """确保返回 data:image/...;base64, 开头的字符串。"""
-    if not b64:
+def bytes_to_b64(data: bytes) -> str:
+    return base64.b64encode(data).decode("utf-8")
+
+
+def normalize_image(val: Any) -> Optional[str]:
+    """
+    将输入转换为 data:image/...;base64,xxx
+    支持:
+      - 已经是 data:image 开头的字符串
+      - 纯 base64 字符串
+      - bytes / bytearray / memoryview
+      - 字节串的字符串表示形式: 形如 "b'...'"
+    """
+    if val is None:
         return None
-    b64 = b64.strip()
-    if b64.startswith("data:image"):
-        return b64
-    # 如果是裸的 base64，补齐前缀
-    return f"data:image/jpeg;base64,{b64}"
+
+    # bytes-like
+    if isinstance(val, (bytes, bytearray, memoryview)):
+        b64 = bytes_to_b64(bytes(val))
+        return f"data:image/jpeg;base64,{b64}"
+
+    # string-like
+    if isinstance(val, str):
+        s = val.strip()
+        # 字节串字符串形式 b'...'
+        if s.startswith("b'") and s.endswith("'") and len(s) > 3:
+            try:
+                inner = s[2:-1]
+                b64 = bytes_to_b64(inner.encode("latin1"))
+                return f"data:image/jpeg;base64,{b64}"
+            except Exception:
+                pass
+        if s.startswith("data:image"):
+            return s
+        # 纯base64
+        s_clean = s.replace("\n", "").replace("\r", "").replace(" ", "")
+        if is_base64_image(s):
+            return f"data:image/jpeg;base64,{s_clean}"
+    return None
 
 
 def pick_image(row: Dict[str, Any]) -> Optional[str]:
     for key in IMAGE_KEYS:
         val = row.get(key)
-        if val:
-            return normalize_image(str(val))
+        if val is not None:
+            normalized = normalize_image(val)
+            if normalized:
+                return normalized
     return None
 
 
@@ -102,9 +146,10 @@ def iter_rows(pf: pq.ParquetFile, limit: int) -> List[Dict[str, str]]:
             for k in IMAGE_KEYS:
                 if k in data:
                     val = data[k][i]
-                    if val:
-                        img = normalize_image(str(val))
-                        break
+                    if val is not None:
+                        img = normalize_image(val)
+                        if img:
+                            break
 
             q_final = build_question(q, h, opts if opts else None)
             a_final = None if a is None else str(a)
