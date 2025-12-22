@@ -139,13 +139,30 @@ def write_markdown(samples: List[Dict[str, str]], path: Path, top_k: int = 3):
         lines.append(f"## Sample {idx}")
         lines.append(f"- **Question:** {s['question'].replace(chr(10), '<br>')}")
         lines.append(f"- **Answer:** {s['answer']}")
-        # 双重兜底：同时使用 Markdown 图片语法和 HTML img，确保渲染
+        # 仅使用 HTML img，避免某些渲染器对 Markdown 链接的 KaTeX 误解析
         lines.append("- **Image:**")
-        lines.append("")  # 空行分隔
-        lines.append(f'![image]({s["image"]})')
-        lines.append(f'<img src="{s["image"]}" alt="sample image" style="max-width:320px;"/>')
-        lines.append("")  # 空行分隔
+        lines.append("")
+        lines.append(f'<p><img src="{s["image"]}" alt="sample image" style="max-width:320px;" /></p>')
+        lines.append("")
     path.write_text("\n".join(lines), encoding="utf-8")
+
+
+def write_html(samples: List[Dict[str, str]], path: Path, top_k: int = 3):
+    """单独输出 HTML，最大化渲染兼容性"""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    top_samples = samples[:top_k]
+    html_parts = [
+        "<!DOCTYPE html>",
+        "<html><head><meta charset='utf-8'><title>Preview</title></head><body>",
+        "<h1>Preview (Top 3)</h1>",
+    ]
+    for idx, s in enumerate(top_samples, 1):
+        html_parts.append(f"<h2>Sample {idx}</h2>")
+        html_parts.append(f"<p><strong>Question:</strong><br>{s['question'].replace(chr(10), '<br>')}</p>")
+        html_parts.append(f"<p><strong>Answer:</strong> {s['answer']}</p>")
+        html_parts.append(f"<p><strong>Image:</strong><br><img src=\"{s['image']}\" alt=\"sample image\" style=\"max-width:480px;\" /></p>")
+    html_parts.append("</body></html>")
+    path.write_text("\n".join(html_parts), encoding="utf-8")
 
 
 def main():
@@ -153,12 +170,14 @@ def main():
     parser.add_argument("--input", required=True, help="Input Parquet file path")
     parser.add_argument("--output", required=True, help="Output JSONL path")
     parser.add_argument("--md", required=True, help="Output Markdown preview path")
+    parser.add_argument("--html", required=False, help="Optional HTML preview path")
     parser.add_argument("--limit", type=int, default=100, help="Number of samples to extract (default: 100)")
     args = parser.parse_args()
 
     input_path = Path(args.input)
     output_path = Path(args.output)
     md_path = Path(args.md)
+    html_path = Path(args.html) if args.html else None
 
     if not input_path.exists():
         raise FileNotFoundError(f"Parquet文件不存在: {input_path}")
@@ -172,9 +191,13 @@ def main():
 
     write_jsonl(samples, output_path)
     write_markdown(samples, md_path, top_k=3)
+    if html_path:
+        write_html(samples, html_path, top_k=3)
 
     print(f"✓ 已提取 {len(samples)} 条样本 -> {output_path}")
     print(f"✓ Markdown预览 -> {md_path}")
+    if html_path:
+        print(f"✓ HTML预览 -> {html_path}")
 
 
 if __name__ == "__main__":
