@@ -1,0 +1,137 @@
+# 大规模数据集优化配置
+
+# 任务类型
+task_type: "vqa"
+
+# 数据路径
+data_paths:
+  train: "data/raw/vqa_train.parquet"
+  validation: null
+  test: null
+
+data_split:
+  auto_split: false
+
+# ============ 内存优化配置 ============
+optimization:
+  strategy: "auto"
+  cache_images: true
+  cache_size: 1000
+  preload_images: false
+  use_streaming: false
+  skip_errors: true
+  memmap_dir: "data/memmap"
+  pin_memory: true
+  prefetch_factor: 2
+  persistent_workers: true
+
+# 图像配置
+image:
+  root_dir: "data/images"
+  load_on_fly: true
+  resize_before_transform: true
+  use_cache: true
+  supported_formats: ['.jpg', '.jpeg', '.png', '.bmp']
+
+# VQA任务配置
+vqa:
+  data_fields:
+    image_field: "image"
+    question_field: "question"
+    answer_field: "answer"
+  max_question_length: 128
+  max_answer_length: 32
+
+# Tokenizer配置（对应BLIP-base）
+tokenizer:
+  name: "Salesforce/blip-vqa-base"  # HF模型自带的tokenizer
+  max_length: 128
+  padding: "max_length"
+  truncation: true
+
+# 图像Processor配置（对应BLIP-base）
+image_processor:
+  name: "Salesforce/blip-vqa-base"  # HF模型自带processor
+  size: 224  # BLIP-base默认224x224
+
+# DataLoader配置
+dataloader:
+  batch_size: 16
+  shuffle: true
+  num_workers: 4
+  pin_memory: true
+  drop_last: false
+  prefetch_factor: 2
+
+# ============ 训练优化建议 ============
+training_optimization:
+  fp16: true
+  gradient_accumulation_steps: 1      # 小数据集可用1
+  effective_batch_size: 16            # batch_size * grad_accum
+  gradient_checkpointing: false       # BLIP-base小数据集可不开
+  optimizer:
+    type: "adamw"
+    lr: 3e-5                           # BLIP-base微调推荐
+    weight_decay: 0.01
+    use_8bit: false
+  freeze_vision_encoder: true          # 冻结ViT，只训练文本部分
+  num_train_epochs: 3
+
+# ============ 数据预处理优化 ============
+preprocessing:
+  batch_preprocess: true
+  batch_size: 1000
+  num_proc: 4
+  cache_processed: true
+  cache_dir: "data/cache"
+
+# ============ 监控和日志 ============
+logging:
+  level: "INFO"
+  log_statistics: true
+  log_memory_usage: true
+  log_interval: 50
+
+# ============ 不同数据集大小的推荐配置 ============
+# 小数据集 (<10k samples)
+# optimization:
+#   strategy: "standard"
+#   cache_images: true
+#   preload_images: true
+# dataloader:
+#   batch_size: 16
+#   num_workers: 4
+
+# 中等数据集 (10k-100k samples)
+# optimization:
+#   strategy: "lazy"
+#   cache_images: true
+#   cache_size: 2000
+#   preload_images: false
+# dataloader:
+#   batch_size: 16
+#   num_workers: 4
+#   persistent_workers: true
+
+# 大数据集 (>100k samples)
+# optimization:
+#   strategy: "streaming"
+#   use_streaming: true
+#   cache_images: false
+# dataloader:
+#   batch_size: 8
+#   num_workers: 2
+# training_optimization:
+#   gradient_accumulation_steps: 8
+#   fp16: true
+
+# 超大数据集 (>1M samples)
+# 先预处理为memmap格式:
+# python scripts/preprocess_to_memmap.py
+# optimization:
+#   strategy: "memmap"
+#   memmap_dir: "data/memmap"
+# dataloader:
+#   batch_size: 16
+#   num_workers: 2
+
