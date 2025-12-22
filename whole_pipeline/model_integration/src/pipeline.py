@@ -8,6 +8,12 @@ import yaml
 from pathlib import Path
 from typing import Dict, Optional, Any, List, Union
 import sys
+import os
+
+# 确保src目录在Python路径中（以便可以直接运行此脚本）
+_script_dir = Path(__file__).parent.absolute()
+if str(_script_dir) not in sys.path:
+    sys.path.insert(0, str(_script_dir))
 
 # 导入各个模块
 from data.data_pipeline import DataPipeline

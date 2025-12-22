@@ -293,7 +293,7 @@ class DatasetOptimizer:
         Returns:
             优化建议
         """
-        from data_loader import DataLoader
+        from data.data_loader import DataLoader
         
         logger.info("分析数据集...")
         

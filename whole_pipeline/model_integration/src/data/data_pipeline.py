@@ -9,10 +9,10 @@ from pathlib import Path
 from typing import Tuple, Optional, Dict
 from transformers import AutoTokenizer, AutoImageProcessor, AutoProcessor
 
-# 假设这些模块在同一目录下
-from data_loader import DataLoader, MultiFileDataLoader
-from data_processor import DataProcessor
-from dataset import (
+# 使用绝对导入（相对于src目录）
+from data.data_loader import DataLoader, MultiFileDataLoader
+from data.data_processor import DataProcessor
+from data.dataset import (
     VQADataset,
     ImageCaptioningDataset,
     ClassificationDataset,
@@ -20,13 +20,13 @@ from dataset import (
     CausalLMDataset,
     create_dataloader
 )
-from dataset_optimized import (
+from data.dataset_optimized import (
     LazyLoadVQADataset,
     StreamingVQADataset,
     MemoryMappedVQADataset,
     create_optimized_dataloader
 )
-from memory_utils import (
+from data.memory_utils import (
     MemoryMonitor,
     DatasetOptimizer,
     DatasetSizeEstimator
@@ -92,7 +92,7 @@ class DataPipeline:
         
         # 6. 打印最终内存使用情况
         if self.config.get('logging', {}).get('log_statistics', True):
-            from memory_utils import MemoryMonitor
+            from data.memory_utils import MemoryMonitor
             MemoryMonitor.print_memory_info()
         
         logger.info("数据管线设置完成")
@@ -108,7 +108,7 @@ class DataPipeline:
         # 如果指定了类型，使用DataProcessor来加载
         if tokenizer_type and tokenizer_type != 'auto':
             try:
-                from data_processor import DataProcessor
+                from data.data_processor import DataProcessor
                 processor_info = DataProcessor.PROCESSOR_REGISTRY.get(tokenizer_type)
                 if processor_info:
                     tokenizer_class = processor_info['tokenizer_class']
@@ -123,7 +123,7 @@ class DataPipeline:
             # 自动检测或使用AutoTokenizer
             try:
                 # 尝试使用DataProcessor自动检测
-                from data_processor import DataProcessor
+                from data.data_processor import DataProcessor
                 temp_processor = DataProcessor({'processor_name': tokenizer_name})
                 if temp_processor.tokenizer:
                     self.tokenizer = temp_processor.tokenizer
@@ -156,7 +156,7 @@ class DataPipeline:
         # 如果指定了类型，使用DataProcessor来加载
         if processor_type and processor_type != 'auto':
             try:
-                from data_processor import DataProcessor
+                from data.data_processor import DataProcessor
                 processor_info = DataProcessor.PROCESSOR_REGISTRY.get(processor_type)
                 if processor_info:
                     # 尝试加载完整的processor（包含image_processor和tokenizer）
@@ -179,7 +179,7 @@ class DataPipeline:
             # 自动检测或使用AutoProcessor
             try:
                 # 尝试使用DataProcessor自动检测
-                from data_processor import DataProcessor
+                from data.data_processor import DataProcessor
                 temp_processor = DataProcessor({'processor_name': processor_name})
                 if temp_processor.image_processor:
                     self.image_processor = temp_processor.image_processor
@@ -211,7 +211,7 @@ class DataPipeline:
     
     def _check_memory_and_optimize(self):
         """检查内存并给出优化建议"""
-        from memory_utils import MemoryMonitor, DatasetOptimizer
+        from data.memory_utils import MemoryMonitor, DatasetOptimizer
         
         # 打印当前内存
         logger.info("检查系统资源...")
@@ -237,8 +237,8 @@ class DataPipeline:
     
     def _load_and_process_data(self):
         """加载和预处理数据"""
-        from data_loader import DataLoader
-        from data_processor import DataProcessor
+        from data.data_loader import DataLoader
+        from data.data_processor import DataProcessor
         
         data_paths = self.config.get('data_paths', {})
         preprocessing_config = self.config.get('preprocessing', {})
@@ -377,14 +377,14 @@ class DataPipeline:
     
     def _create_datasets(self):
         """创建PyTorch数据集（根据优化策略选择）"""
-        from dataset import (
+        from data.dataset import (
             VQADataset,
             ImageCaptioningDataset,
             ClassificationDataset,
             Seq2SeqDataset,
             CausalLMDataset
         )
-        from dataset_optimized import LazyLoadVQADataset, StreamingVQADataset
+        from data.dataset_optimized import LazyLoadVQADataset, StreamingVQADataset
         
         task_type = self.config.get('task_type', 'classification')
         tokenizer_config = self.config.get('tokenizer', {})
@@ -505,7 +505,7 @@ class DataPipeline:
     
     def _create_streaming_datasets(self):
         """创建流式数据集"""
-        from dataset_optimized import StreamingVQADataset
+        from data.dataset_optimized import StreamingVQADataset
         
         vqa_config = self.config.get('vqa', {})
         data_fields = vqa_config.get('data_fields', {})
@@ -534,7 +534,7 @@ class DataPipeline:
     
     def _create_dataloaders(self):
         """创建DataLoader"""
-        from dataset import create_dataloader
+        from data.dataset import create_dataloader
         
         dataloader_config = self.config.get('dataloader', {})
         

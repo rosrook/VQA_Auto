@@ -15,11 +15,7 @@ from pathlib import Path
 import time
 from tqdm import tqdm
 
-# 导入data和model模块
-import sys
-from pathlib import Path as PathLib
-sys.path.append(str(PathLib(__file__).parent.parent))
-
+# 导入data和model模块（使用绝对导入）
 from data.data_pipeline import DataPipeline
 from models.model_loader import load_model
 from models.model_utils import freeze_model, print_model_summary, get_model_info

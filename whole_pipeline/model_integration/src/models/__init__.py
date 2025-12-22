@@ -2,8 +2,8 @@
 模型模块
 提供模型加载和工具函数
 """
-from model_loader import ModelLoader, load_model
-from model_utils import (
+from models.model_loader import ModelLoader, load_model
+from models.model_utils import (
     count_parameters,
     get_model_size_mb,
     freeze_model,

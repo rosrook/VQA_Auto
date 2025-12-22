@@ -5,13 +5,15 @@
 import sys
 from pathlib import Path
 
-# 添加路径（如果需要）
-sys.path.append(str(Path(__file__).parent))
+# 添加src目录到路径（以便可以直接运行此脚本）
+src_dir = Path(__file__).parent.parent
+if str(src_dir) not in sys.path:
+    sys.path.insert(0, str(src_dir))
 
-from data_pipeline import DataPipeline
-from data_loader import DataLoader
-from data_processor import DataProcessor
-from dataset import VQADataset, create_dataloader
+from data.data_pipeline import DataPipeline
+from data.data_loader import DataLoader
+from data.data_processor import DataProcessor
+from data.dataset import VQADataset, create_dataloader
 
 # 安全导入BlipProcessor（如果不存在则使用AutoProcessor）
 try:

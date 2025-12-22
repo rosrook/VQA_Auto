@@ -691,7 +691,7 @@ def preprocess_to_memmap(
         max_answer_length: 最大答案长度
         image_size: 图像尺寸
     """
-    from data_loader import DataLoader as CustomDataLoader
+    from data.data_loader import DataLoader as CustomDataLoader
     from tqdm import tqdm
     
     logger.info("开始预处理数据...")
