@@ -7,8 +7,9 @@ import torch
 from typing import Optional, Dict, Any, Union
 from pathlib import Path
 from transformers import (
-    AutoModelForConditionalGeneration,
-    AutoModel,
+    AutoModelForSeq2SeqLM,  # Seq2Seq任务（T5/BLIP/VQA）- transformers >=4.5.0推荐
+    AutoModelForCausalLM,   # Causal LM任务（LLaMA/GPT）
+    AutoModel,              # Encoder-only任务
     AutoProcessor,
     PreTrainedModel,
     PreTrainedTokenizer,
@@ -26,13 +27,13 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
     logger.warning(
-        "无法导入 BLIP 相关类，将使用 AutoModel/AutoProcessor 作为回退。"
+        "无法导入 BLIP 相关类，将使用 AutoModelForSeq2SeqLM 作为回退。"
         "如果需要使用 BLIP 模型，请升级 transformers 版本（>=4.30.0）"
     )
-    # 使用 Auto 类作为回退
-    BlipForQuestionAnswering = AutoModelForConditionalGeneration
+    # 使用 Auto 类作为回退（BLIP是Seq2Seq模型）
+    BlipForQuestionAnswering = AutoModelForSeq2SeqLM
     BlipForImageTextRetrieval = AutoModel
-    BlipForConditionalGeneration = AutoModelForConditionalGeneration
+    BlipForConditionalGeneration = AutoModelForSeq2SeqLM
     BlipProcessor = AutoProcessor
 
 logger = logging.getLogger(__name__)
@@ -197,9 +198,18 @@ class ModelLoader:
             except Exception as e:
                 logger.warning(f"使用指定类型加载模型失败: {e}，回退到AutoModel")
         
-        # 使用AutoModel
-        logger.info("使用AutoModelForConditionalGeneration")
-        return self._load_with_class(AutoModelForConditionalGeneration, load_kwargs)
+        # 使用AutoModel（根据任务类型选择合适的类）
+        # 默认使用 AutoModelForSeq2SeqLM（适用于VQA等Seq2Seq任务）
+        # 注意：transformers >=4.5.0 已移除 AutoModelForConditionalGeneration
+        if self.task in ['vqa', 'image_captioning', 'seq2seq']:
+            logger.info("使用AutoModelForSeq2SeqLM（Seq2Seq任务）")
+            return self._load_with_class(AutoModelForSeq2SeqLM, load_kwargs)
+        elif self.task in ['causal_lm', 'text_generation']:
+            logger.info("使用AutoModelForCausalLM（Causal LM任务）")
+            return self._load_with_class(AutoModelForCausalLM, load_kwargs)
+        else:
+            logger.info("使用AutoModel（Encoder-only任务）")
+            return self._load_with_class(AutoModel, load_kwargs)
     
     def _load_with_class(
         self,

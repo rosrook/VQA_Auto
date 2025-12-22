@@ -13,7 +13,9 @@ from transformers import (
     PreTrainedModel,
     PreTrainedTokenizer,
     PreTrainedTokenizerFast,
-    AutoModelForConditionalGeneration,
+    AutoModelForSeq2SeqLM,  # Seq2Seq任务（T5/BLIP/VQA）- transformers >=4.5.0推荐
+    AutoModelForCausalLM,   # Causal LM任务（LLaMA/GPT）
+    AutoModel,              # Encoder-only任务
     AutoProcessor,
 )
 
@@ -23,10 +25,11 @@ try:
 except ImportError:
     logger = logging.getLogger(__name__)
     logger.warning(
-        "无法导入 BLIP 相关类，将使用 AutoModel/AutoProcessor 作为回退。"
+        "无法导入 BLIP 相关类，将使用 AutoModelForSeq2SeqLM 作为回退。"
         "如果需要使用 BLIP 模型，请升级 transformers 版本（>=4.30.0）"
     )
-    BlipForQuestionAnswering = AutoModelForConditionalGeneration
+    # BLIP是Seq2Seq模型，使用AutoModelForSeq2SeqLM作为回退
+    BlipForQuestionAnswering = AutoModelForSeq2SeqLM
     BlipProcessor = AutoProcessor
 
 logger = logging.getLogger(__name__)
@@ -234,9 +237,10 @@ def load_model_from_path(
         raise FileNotFoundError(f"模型路径不存在: {model_path}")
     
     if model_class is None:
-        # 尝试使用AutoModel
-        from transformers import AutoModelForConditionalGeneration
-        model_class = AutoModelForConditionalGeneration
+        # 尝试使用AutoModelForSeq2SeqLM（适用于VQA等Seq2Seq任务）
+        # 注意：transformers >=4.5.0 已移除 AutoModelForConditionalGeneration
+        from transformers import AutoModelForSeq2SeqLM
+        model_class = AutoModelForSeq2SeqLM
     
     if issubclass(model_class, PreTrainedModel):
         model = model_class.from_pretrained(str(model_path), **kwargs)
