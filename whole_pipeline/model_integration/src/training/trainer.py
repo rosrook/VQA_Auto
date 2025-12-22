@@ -166,6 +166,18 @@ class Trainer:
         # 设置调试日志（写入文件，不刷屏）
         self.debug_logger = setup_debug_logger(log_dir=str(Path(self.save_dir) / "debug_logs"))
         
+        # 检查调试环境变量
+        import os
+        if not os.environ.get('CUDA_LAUNCH_BLOCKING', ''):
+            logger.warning("⚠️  建议设置环境变量 CUDA_LAUNCH_BLOCKING=1 以获得更详细的CUDA错误信息")
+            logger.warning("   使用方法: export CUDA_LAUNCH_BLOCKING=1")
+        
+        # 检查DataLoader配置
+        if hasattr(train_dataloader, 'batch_size') and train_dataloader.batch_size > 1:
+            logger.info(f"💡 如果遇到CUDA错误，可以尝试设置 batch_size=1 来隔离问题")
+        if hasattr(train_dataloader, 'num_workers') and train_dataloader.num_workers > 0:
+            logger.info(f"💡 如果遇到CUDA错误，可以尝试设置 num_workers=0 来关闭多进程")
+        
         logger.info(f"训练器初始化完成")
         logger.info(f"设备: {self.device}")
         logger.info(f"训练样本数: {len(train_dataloader.dataset)}")
@@ -380,20 +392,105 @@ class Trainer:
         return {'train_loss': avg_loss}
     
     def _train_step(self, batch: Dict[str, Any]) -> float:
-        """执行一个训练步骤"""
+        """
+        执行一个训练步骤
+        
+        注意：如果CUDA错误发生，会在这里捕获并打印详细的batch信息
+        """
         # 清零梯度
         self.optimizer.zero_grad()
         
         # 前向传播
-        if self.use_amp:
-            with torch.cuda.amp.autocast():
+        try:
+            if self.use_amp:
+                with torch.cuda.amp.autocast():
+                    outputs = self.model(**batch)
+                    loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
+                    loss = loss / self.gradient_accumulation_steps
+            else:
                 outputs = self.model(**batch)
                 loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
                 loss = loss / self.gradient_accumulation_steps
-        else:
-            outputs = self.model(**batch)
-            loss = outputs.loss if hasattr(outputs, 'loss') else outputs['loss']
-            loss = loss / self.gradient_accumulation_steps
+        except RuntimeError as e:
+            error_str = str(e)
+            if "CUDA" in error_str or "device-side assert" in error_str or "index" in error_str.lower():
+                debug_logger = get_debug_logger()
+                debug_logger.error("=" * 80)
+                debug_logger.error("❌ 在_train_step的model(**batch)调用中发生CUDA错误")
+                debug_logger.error("=" * 80)
+                debug_logger.error(f"错误消息: {error_str}")
+                debug_logger.error("\n出错batch的详细内容:")
+                
+                # 获取vocab_size用于验证
+                vocab_size = None
+                text_vocab_size = None
+                if hasattr(self.model, 'config'):
+                    vocab_size = getattr(self.model.config, 'vocab_size', None)
+                    if hasattr(self.model.config, 'text_config'):
+                        text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
+                effective_vocab_size = text_vocab_size or vocab_size
+                
+                for k, v in batch.items():
+                    if isinstance(v, torch.Tensor):
+                        try:
+                            # 尝试移动到CPU检查
+                            v_cpu = v.cpu()
+                            debug_logger.error(f"  {k}:")
+                            debug_logger.error(f"    shape: {v.shape}")
+                            debug_logger.error(f"    dtype: {v.dtype}")
+                            debug_logger.error(f"    device: {v.device}")
+                            debug_logger.error(f"    min: {v_cpu.min().item()}, max: {v_cpu.max().item()}")
+                            
+                            # 特别检查token ID字段
+                            if 'id' in k.lower():
+                                if k == 'labels':
+                                    # 检查labels中的非法值（除了-100）
+                                    if effective_vocab_size:
+                                        invalid_mask = (v_cpu != -100) & ((v_cpu < 0) | (v_cpu >= effective_vocab_size))
+                                        if invalid_mask.any():
+                                            invalid_count = invalid_mask.sum().item()
+                                            invalid_values = v_cpu[invalid_mask].unique()
+                                            debug_logger.error(f"    ❌ 发现 {invalid_count} 个越界labels值!")
+                                            debug_logger.error(f"    越界值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
+                                            debug_logger.error(f"    vocab_size: {effective_vocab_size}")
+                                            if invalid_count < 50:
+                                                debug_logger.error(f"    越界值列表: {invalid_values.tolist()}")
+                                        else:
+                                            valid_labels = v_cpu[v_cpu != -100]
+                                            if len(valid_labels) > 0:
+                                                debug_logger.error(f"    ✅ labels有效值范围: [{valid_labels.min().item()}, {valid_labels.max().item()}]")
+                                else:
+                                    # input_ids或decoder_input_ids
+                                    if effective_vocab_size:
+                                        invalid_mask = (v_cpu < 0) | (v_cpu >= effective_vocab_size)
+                                        if invalid_mask.any():
+                                            invalid_count = invalid_mask.sum().item()
+                                            invalid_values = v_cpu[invalid_mask].unique()
+                                            debug_logger.error(f"    ❌ 发现 {invalid_count} 个越界{k}值!")
+                                            debug_logger.error(f"    越界值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
+                                            debug_logger.error(f"    vocab_size: {effective_vocab_size}")
+                                            if invalid_count < 50:
+                                                debug_logger.error(f"    越界值列表: {invalid_values.tolist()}")
+                            
+                            # 检查attention_mask
+                            if 'mask' in k.lower():
+                                unique_values = v_cpu.unique()
+                                invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+                                if len(invalid_values) > 0:
+                                    debug_logger.error(f"    ❌ {k}包含非法值（不是0或1）: {invalid_values.tolist()}")
+                        except Exception as inner_e:
+                            debug_logger.error(f"  {k}: 无法检查详情 - {inner_e}")
+                    else:
+                        debug_logger.error(f"  {k}: {type(v)} = {v}")
+                
+                debug_logger.error("=" * 80)
+                debug_logger.error("建议：")
+                debug_logger.error("1. 检查数据加载代码，确保token IDs在有效范围内")
+                debug_logger.error("2. 尝试设置 batch_size=1 和 num_workers=0 来隔离问题")
+                debug_logger.error("3. 设置环境变量 CUDA_LAUNCH_BLOCKING=1 以获得更详细的错误信息")
+                debug_logger.error("=" * 80)
+            
+            raise
         
         # 反向传播
         if self.use_amp:
@@ -715,7 +812,7 @@ class Trainer:
                     
                     # 强制修复：确保所有非-100的labels都在有效范围内
                     if effective_vocab_size is not None:
-                        # 找出所有非法值
+                        # 找出所有非法值（包括负值，除了-100）
                         invalid_mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
                         invalid_count = invalid_mask.sum().item()
                         
@@ -724,6 +821,21 @@ class Trainer:
                             invalid_values = labels_cpu[invalid_mask].unique()
                             debug_logger.error(f"   非法值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
                             debug_logger.error(f"   vocab_size: {effective_vocab_size}")
+                            
+                            # 检查是否有负值（除了-100）
+                            negative_mask = (labels_cpu != -100) & (labels_cpu < 0)
+                            negative_count = negative_mask.sum().item()
+                            if negative_count > 0:
+                                negative_values = labels_cpu[negative_mask].unique()
+                                debug_logger.error(f"   发现 {negative_count} 个负值（除了-100）: {negative_values.tolist()}")
+                            
+                            # 检查是否有超出vocab_size的值
+                            overflow_mask = (labels_cpu != -100) & (labels_cpu >= effective_vocab_size)
+                            overflow_count = overflow_mask.sum().item()
+                            if overflow_count > 0:
+                                overflow_values = labels_cpu[overflow_mask].unique()
+                                debug_logger.error(f"   发现 {overflow_count} 个超出vocab_size的值: {overflow_values.tolist()}")
+                            
                             debug_logger.warning(f"   🔧 将所有非法labels设置为-100...")
                             
                             # 将所有非法值设置为-100
@@ -745,6 +857,16 @@ class Trainer:
                                 max_label = valid_labels.max().item()
                                 min_label = valid_labels.min().item()
                                 debug_logger.info(f"📊 labels统计: min={min_label}, max={max_label} (忽略-100)")
+                                
+                                # 额外检查：确保没有其他负值
+                                negative_mask = (labels_cpu != -100) & (labels_cpu < 0)
+                                if negative_mask.any():
+                                    negative_values = labels_cpu[negative_mask].unique()
+                                    debug_logger.error(f"❌ 发现意外的负值（除了-100）: {negative_values.tolist()}")
+                                    # 修复这些负值
+                                    labels_cpu[negative_mask] = -100
+                                    labels = labels_cpu
+                                    debug_logger.warning(f"   🔧 已将负值修复为-100")
                     
                     # 确保labels在CPU上，然后再移动到GPU
                     if labels.is_cuda:
