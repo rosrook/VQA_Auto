@@ -148,29 +148,42 @@ class Trainer:
         self.history = []
         
         # 混合精度训练
-        # 检查模型dtype：如果模型是bfloat16，GradScaler不支持，需要禁用AMP或使用FP16
+        # 检查模型dtype：GradScaler需要FP32参数，如果模型已经是FP16/BFloat16，需要禁用AMP
         model_dtype = None
         if hasattr(model, 'dtype'):
             model_dtype = model.dtype
         elif hasattr(model, 'config') and hasattr(model.config, 'torch_dtype'):
             model_dtype = model.config.torch_dtype
         
+        # 检查第一个参数的dtype（更准确）
+        if model_dtype is None:
+            try:
+                first_param = next(model.parameters())
+                model_dtype = first_param.dtype
+            except StopIteration:
+                pass
+        
         if self.fp16:
             try:
                 from torch.cuda.amp import autocast, GradScaler
                 
-                # 检查模型是否使用bfloat16
-                if model_dtype == torch.bfloat16:
+                # GradScaler只能用于FP32参数的模型
+                # 如果模型已经是FP16/BFloat16，需要禁用AMP或转换模型为FP32
+                if model_dtype in (torch.float16, torch.bfloat16):
                     logger.warning(
-                        "⚠️  模型使用bfloat16，但GradScaler不支持bfloat16。"
-                        "将禁用混合精度训练，或考虑使用float16加载模型。"
+                        f"⚠️  模型参数已经是{model_dtype}，但GradScaler需要FP32参数。"
+                        f"将禁用混合精度训练（AMP），模型将使用{model_dtype}进行训练。"
                     )
                     self.use_amp = False
                     self.scaler = None
-                else:
+                elif model_dtype == torch.float32:
                     self.scaler = GradScaler()
                     self.use_amp = True
-                    logger.info("启用混合精度训练（FP16）")
+                    logger.info("启用混合精度训练（FP16 AMP）")
+                else:
+                    logger.warning(f"⚠️  未知的模型dtype: {model_dtype}，禁用混合精度训练")
+                    self.use_amp = False
+                    self.scaler = None
             except ImportError:
                 logger.warning("无法启用混合精度训练，需要CUDA支持")
                 self.use_amp = False
@@ -178,6 +191,10 @@ class Trainer:
         else:
             self.use_amp = False
             self.scaler = None
+        
+        # 记录模型dtype信息
+        if model_dtype:
+            logger.info(f"模型参数dtype: {model_dtype}")
         
         # 创建保存目录
         Path(self.save_dir).mkdir(parents=True, exist_ok=True)

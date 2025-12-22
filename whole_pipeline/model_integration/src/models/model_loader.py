@@ -233,13 +233,20 @@ class ModelLoader:
         }
         
         # 数据类型
+        # 注意：如果使用混合精度训练（AMP），模型参数应该是FP32
+        # AMP会在forward时自动转换为FP16，但参数本身保持FP32
+        # 如果模型参数是FP16/BFloat16，GradScaler无法工作
         if 'torch_dtype' in load_kwargs:
             safe_kwargs['torch_dtype'] = load_kwargs['torch_dtype']
+            logger.info(f"使用指定的dtype: {load_kwargs['torch_dtype']}")
         elif self.device == 'cuda':
-            # 默认使用float16而不是bfloat16，因为GradScaler不支持bfloat16
-            # 如果需要bfloat16，可以在load_kwargs中显式指定
-            safe_kwargs['torch_dtype'] = torch.float16
-            # 如果用户明确需要bfloat16，可以使用下面的代码
+            # 默认使用float32，以便与AMP兼容
+            # 如果用户需要FP16/BFloat16模型（不使用AMP），可以在load_kwargs中显式指定
+            safe_kwargs['torch_dtype'] = torch.float32
+            logger.info("默认使用float32加载模型（与AMP兼容）")
+            # 如果需要FP16模型（不使用AMP），可以使用：
+            # safe_kwargs['torch_dtype'] = torch.float16
+            # 如果需要BFloat16模型（不使用AMP），可以使用：
             # safe_kwargs['torch_dtype'] = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         
         # 设备映射
