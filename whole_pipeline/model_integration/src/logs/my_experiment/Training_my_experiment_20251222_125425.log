@@ -1,0 +1,176 @@
+2025-12-22 12:54:25,849 - Training_my_experiment - INFO - Configuration saved
+2025-12-22 12:54:25,850 - Training_my_experiment - INFO - {
+  "task_type": "vqa",
+  "experiment_name": null,
+  "data_paths": {
+    "train": "/home/zhuxuzhou/VQA_Auto/whole_pipeline/model_integration/data/preview.jsonl",
+    "validation": null,
+    "test": null
+  },
+  "data_split": {
+    "auto_split": false,
+    "train_ratio": 0.8,
+    "val_ratio": 0.1,
+    "test_ratio": 0.1,
+    "shuffle": true,
+    "random_seed": 42,
+    "stratify_by": null
+  },
+  "optimization": {
+    "strategy": "auto",
+    "cache_images": true,
+    "cache_size": 1000,
+    "preload_images": false,
+    "use_streaming": false,
+    "skip_errors": true,
+    "memmap_dir": "data/memmap",
+    "pin_memory": true,
+    "prefetch_factor": 2,
+    "persistent_workers": true
+  },
+  "image": {
+    "root_dir": "data/images",
+    "load_on_fly": true,
+    "resize_before_transform": true,
+    "use_cache": true,
+    "supported_formats": [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".bmp"
+    ]
+  },
+  "vqa": {
+    "data_fields": {
+      "image_field": "image",
+      "question_field": "question",
+      "answer_field": "answer"
+    },
+    "max_question_length": 128,
+    "max_answer_length": 32
+  },
+  "tokenizer": {
+    "name": "Salesforce/blip-vqa-base",
+    "type": "blip",
+    "max_length": 128,
+    "padding": "max_length",
+    "truncation": true
+  },
+  "image_processor": {
+    "name": "Salesforce/blip-vqa-base",
+    "type": "blip",
+    "size": 384
+  },
+  "dataloader": {
+    "batch_size": 16,
+    "shuffle": true,
+    "num_workers": 4,
+    "pin_memory": true,
+    "drop_last": false,
+    "prefetch_factor": 2
+  },
+  "model": {
+    "name": "Salesforce/blip-vqa-base",
+    "type": "blip",
+    "task": "vqa",
+    "device": null,
+    "torch_dtype": null,
+    "device_map": null,
+    "load_in_8bit": false,
+    "load_in_4bit": false,
+    "trust_remote_code": true,
+    "low_cpu_mem_usage": true
+  },
+  "training": {
+    "num_epochs": 5,
+    "fp16": true,
+    "gradient_accumulation_steps": 2,
+    "max_grad_norm": 1.0,
+    "checkpoint_dir": "checkpoints",
+    "max_checkpoints": 5,
+    "save_best_only": true,
+    "checkpoint_monitor": "val_loss",
+    "optimizer": {
+      "type": "adamw",
+      "lr": "3e-5",
+      "weight_decay": 0.01,
+      "betas": [
+        0.9,
+        0.999
+      ],
+      "eps": "1e-8"
+    },
+    "scheduler": {
+      "type": "cosine",
+      "T_max": null,
+      "eta_min": 0.0,
+      "step_size": 1,
+      "gamma": 0.1,
+      "factor": 0.5,
+      "patience": 2,
+      "mode": "min"
+    },
+    "early_stopping": {
+      "enabled": true,
+      "monitor": "val_loss",
+      "patience": 3,
+      "min_delta": 0.001,
+      "mode": "min",
+      "restore_best_weights": true
+    },
+    "freeze": {
+      "enabled": true,
+      "layers": [
+        "vision_model"
+      ]
+    },
+    "use_tensorboard": true,
+    "eval_strategy": "epoch",
+    "eval_steps": null,
+    "save_strategy": "epoch",
+    "save_steps": null
+  },
+  "evaluation": {
+    "metrics": [
+      "loss",
+      "accuracy",
+      "exact_match",
+      "f1"
+    ],
+    "vqa": {
+      "max_length": 20,
+      "num_beams": 3,
+      "temperature": 1.0,
+      "top_p": 1.0
+    }
+  },
+  "preprocessing": {
+    "batch_preprocess": true,
+    "batch_size": 1000,
+    "num_proc": 4,
+    "cache_processed": true,
+    "cache_dir": "data/cache",
+    "processor": {
+      "processor_type": null,
+      "processor_name": null
+    }
+  },
+  "logging": {
+    "level": "INFO",
+    "log_dir": "logs",
+    "log_statistics": true,
+    "log_memory_usage": true,
+    "log_interval": 50,
+    "file_logging": true,
+    "console_logging": true
+  },
+  "inference": {
+    "max_length": 20,
+    "num_beams": 3,
+    "temperature": 1.0,
+    "top_p": 1.0,
+    "top_k": 50,
+    "do_sample": false,
+    "repetition_penalty": 1.0
+  }
+}

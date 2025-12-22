@@ -194,16 +194,20 @@ class Trainer:
             except RuntimeError as e:
                 error_str = str(e)
                 if "CUDA" in error_str or "device-side assert" in error_str or "index" in error_str.lower():
-                    # CUDA错误，可能是索引越界，打印详细信息
                     logger.error(f"CUDA错误在batch {batch_idx}: {e}")
                     logger.error("Batch内容:")
                     for key, value in batch.items():
                         if isinstance(value, torch.Tensor):
-                            logger.error(f"  {key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
-                            if 'ids' in key.lower() or 'mask' in key.lower():
-                                logger.error(f"    min={value.min().item()}, max={value.max().item()}")
-                                if value.numel() < 100:  # 如果tensor不大，打印所有值
-                                    logger.error(f"    values={value.tolist()}")
+                            # 移动到CPU再检查，避免CUDA错误
+                            try:
+                                value_cpu = value.cpu()
+                                logger.error(f"  {key}: shape={value.shape}, dtype={value.dtype}, device={value.device}")
+                                if 'ids' in key.lower() or 'mask' in key.lower():
+                                    logger.error(f"    min={value_cpu.min().item()}, max={value_cpu.max().item()}")
+                                    if value.numel() < 100:
+                                        logger.error(f"    values={value_cpu.tolist()}")
+                            except Exception as inner_e:
+                                logger.error(f"  {key}: 无法检查详情 - {inner_e}")
                         else:
                             logger.error(f"  {key}: {type(value)}")
                     raise
@@ -289,109 +293,260 @@ class Trainer:
         
         return val_logs
     
+    # def _prepare_batch(self, batch: Dict[str, Any]) -> Dict[str, Any]:
+    #     """
+    #     准备batch，移动到设备并验证tensor shapes和值
+        
+    #     注意：BLIP等模型对attention_mask的形状和值有严格要求
+    #     """
+    #     prepared_batch = {}
+        
+    #     # 首先验证关键字段
+    #     if 'input_ids' in batch:
+    #         input_ids = batch['input_ids']
+    #         if not isinstance(input_ids, torch.Tensor):
+    #             raise TypeError(f"input_ids应该是torch.Tensor，得到{type(input_ids)}")
+            
+    #         # 验证input_ids shape
+    #         if input_ids.dim() != 2:
+    #             raise ValueError(f"input_ids应该是2D tensor [batch_size, seq_len]，得到shape {input_ids.shape}")
+            
+    #         batch_size, seq_len = input_ids.shape
+            
+    #         # 验证attention_mask（如果存在）
+    #         if 'attention_mask' in batch:
+    #             attention_mask = batch['attention_mask']
+    #             if not isinstance(attention_mask, torch.Tensor):
+    #                 raise TypeError(f"attention_mask应该是torch.Tensor，得到{type(attention_mask)}")
+                
+    #             # 验证attention_mask shape
+    #             if attention_mask.shape != input_ids.shape:
+    #                 logger.warning(
+    #                     f"attention_mask shape {attention_mask.shape} 与 input_ids shape {input_ids.shape} 不匹配，"
+    #                     f"尝试修复..."
+    #                 )
+    #                 # 尝试修复：如果维度不匹配，尝试reshape或重新创建
+    #                 if attention_mask.dim() == 1 and len(attention_mask) == seq_len:
+    #                     # 如果是1D且长度匹配，扩展到batch维度
+    #                     attention_mask = attention_mask.unsqueeze(0).expand(batch_size, -1)
+    #                 elif attention_mask.dim() == 2 and attention_mask.size(0) == batch_size:
+    #                     # 如果batch维度匹配但seq_len不匹配，重新创建
+    #                     if attention_mask.size(1) != seq_len:
+    #                         # 重新创建attention_mask：非padding位置为1
+    #                         pad_id = getattr(self.model.config, 'pad_token_id', None) if hasattr(self.model, 'config') else None
+    #                         if pad_id is None:
+    #                             # 如果没有pad_token_id，假设所有非0位置都是有效token
+    #                             attention_mask = (input_ids != 0).long()
+    #                         else:
+    #                             attention_mask = (input_ids != pad_id).long()
+    #                 else:
+    #                     # 完全重新创建
+    #                     pad_id = getattr(self.model.config, 'pad_token_id', None) if hasattr(self.model, 'config') else None
+    #                     if pad_id is None:
+    #                         attention_mask = (input_ids != 0).long()
+    #                     else:
+    #                         attention_mask = (input_ids != pad_id).long()
+                    
+    #                 logger.info(f"修复后的attention_mask shape: {attention_mask.shape}")
+                
+    #             # 验证attention_mask值（应该是0或1）
+    #             unique_values = torch.unique(attention_mask)
+    #             invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
+    #             if len(invalid_values) > 0:
+    #                 logger.warning(
+    #                     f"attention_mask包含非法值: {invalid_values.tolist()}，"
+    #                     f"将clamp到[0, 1]范围"
+    #                 )
+    #                 attention_mask = torch.clamp(attention_mask, 0, 1).long()
+                
+    #             prepared_batch['attention_mask'] = attention_mask.to(self.device)
+            
+    #         # 验证labels（如果存在）
+    #         if 'labels' in batch:
+    #             labels = batch['labels']
+    #             if isinstance(labels, torch.Tensor):
+    #                 if labels.shape != input_ids.shape:
+    #                     logger.warning(
+    #                         f"labels shape {labels.shape} 与 input_ids shape {input_ids.shape} 不匹配"
+    #                     )
+    #                     # 尝试修复：如果维度不匹配
+    #                     if labels.dim() == 1 and len(labels) == seq_len:
+    #                         labels = labels.unsqueeze(0).expand(batch_size, -1)
+    #                     elif labels.dim() == 2 and labels.size(0) == batch_size and labels.size(1) != seq_len:
+    #                         # 如果seq_len不匹配，可能需要padding或truncation
+    #                         logger.error(f"无法修复labels shape不匹配: {labels.shape} vs {input_ids.shape}")
+    #                         raise ValueError(f"labels shape不匹配: {labels.shape} vs {input_ids.shape}")
+    #                 prepared_batch['labels'] = labels.to(self.device)
+            
+    #         prepared_batch['input_ids'] = input_ids.to(self.device)
+        
+    #     # 处理其他字段
+    #     for key, value in batch.items():
+    #         if key not in prepared_batch:  # 避免重复处理
+    #             if isinstance(value, torch.Tensor):
+    #                 prepared_batch[key] = value.to(self.device)
+    #             elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
+    #                 # 处理tensor列表（如pixel_values的batch）
+    #                 prepared_batch[key] = [v.to(self.device) for v in value]
+    #             else:
+    #                 prepared_batch[key] = value
+        
+    #     # 最终验证：确保所有tensor都在同一设备上
+    #     for key, value in prepared_batch.items():
+    #         if isinstance(value, torch.Tensor) and value.device != self.device:
+    #             logger.warning(f"{key}不在正确设备上: {value.device} vs {self.device}，移动到{self.device}")
+    #             prepared_batch[key] = value.to(self.device)
+        
+    #     return prepared_batch
+
     def _prepare_batch(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
         准备batch，移动到设备并验证tensor shapes和值
         
-        注意：BLIP等模型对attention_mask的形状和值有严格要求
+        特别注意BLIP模型的特殊要求
         """
         prepared_batch = {}
         
-        # 首先验证关键字段
+        # 获取模型词表大小
+        vocab_size = None
+        text_vocab_size = None
+        if hasattr(self.model, 'config'):
+            vocab_size = getattr(self.model.config, 'vocab_size', None)
+            # BLIP有单独的text_config
+            if hasattr(self.model.config, 'text_config'):
+                text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
+        
+        # 使用text_vocab_size（如果存在）
+        effective_vocab_size = text_vocab_size or vocab_size
+        
         if 'input_ids' in batch:
             input_ids = batch['input_ids']
             if not isinstance(input_ids, torch.Tensor):
                 raise TypeError(f"input_ids应该是torch.Tensor，得到{type(input_ids)}")
             
-            # 验证input_ids shape
             if input_ids.dim() != 2:
                 raise ValueError(f"input_ids应该是2D tensor [batch_size, seq_len]，得到shape {input_ids.shape}")
             
             batch_size, seq_len = input_ids.shape
             
-            # 验证attention_mask（如果存在）
+            # 在CPU上验证
+            input_ids_cpu = input_ids.cpu()
+            max_id = input_ids_cpu.max().item()
+            min_id = input_ids_cpu.min().item()
+            
+            logger.info(f"📊 input_ids统计: min={min_id}, max={max_id}, vocab_size={effective_vocab_size}")
+            
+            # 检查并修复
+            if effective_vocab_size is not None:
+                if max_id >= effective_vocab_size or min_id < 0:
+                    logger.error(f"❌ input_ids超出范围: [{min_id}, {max_id}] vs [0, {effective_vocab_size-1}]")
+                    
+                    # 修复策略
+                    pad_id = getattr(self.model.config, 'pad_token_id', 0)
+                    unk_id = getattr(self.model.config, 'unk_token_id', pad_id)
+                    
+                    logger.warning(f"   🔧 Clamping到有效范围...")
+                    input_ids_cpu = torch.clamp(input_ids_cpu, 0, effective_vocab_size - 1)
+                    input_ids = input_ids_cpu
+                    
+                    logger.info(f"   ✅ 修复后: min={input_ids.min().item()}, max={input_ids.max().item()}")
+            
+            prepared_batch['input_ids'] = input_ids.to(self.device)
+            
+            # ===== 关键：处理 decoder_input_ids (BLIP特有) =====
+            if 'decoder_input_ids' in batch:
+                decoder_input_ids = batch['decoder_input_ids']
+                if isinstance(decoder_input_ids, torch.Tensor):
+                    decoder_input_ids_cpu = decoder_input_ids.cpu()
+                    max_dec_id = decoder_input_ids_cpu.max().item()
+                    min_dec_id = decoder_input_ids_cpu.min().item()
+                    
+                    logger.info(f"📊 decoder_input_ids统计: min={min_dec_id}, max={max_dec_id}")
+                    
+                    if effective_vocab_size is not None:
+                        if max_dec_id >= effective_vocab_size or min_dec_id < 0:
+                            logger.error(f"❌ decoder_input_ids超出范围!")
+                            decoder_input_ids_cpu = torch.clamp(decoder_input_ids_cpu, 0, effective_vocab_size - 1)
+                            decoder_input_ids = decoder_input_ids_cpu
+                            logger.info(f"   ✅ decoder修复后: min={decoder_input_ids.min().item()}, max={decoder_input_ids.max().item()}")
+                    
+                    prepared_batch['decoder_input_ids'] = decoder_input_ids.to(self.device)
+            
+            # 处理 attention_mask
             if 'attention_mask' in batch:
                 attention_mask = batch['attention_mask']
                 if not isinstance(attention_mask, torch.Tensor):
                     raise TypeError(f"attention_mask应该是torch.Tensor，得到{type(attention_mask)}")
                 
-                # 验证attention_mask shape
                 if attention_mask.shape != input_ids.shape:
-                    logger.warning(
-                        f"attention_mask shape {attention_mask.shape} 与 input_ids shape {input_ids.shape} 不匹配，"
-                        f"尝试修复..."
-                    )
-                    # 尝试修复：如果维度不匹配，尝试reshape或重新创建
-                    if attention_mask.dim() == 1 and len(attention_mask) == seq_len:
-                        # 如果是1D且长度匹配，扩展到batch维度
-                        attention_mask = attention_mask.unsqueeze(0).expand(batch_size, -1)
-                    elif attention_mask.dim() == 2 and attention_mask.size(0) == batch_size:
-                        # 如果batch维度匹配但seq_len不匹配，重新创建
-                        if attention_mask.size(1) != seq_len:
-                            # 重新创建attention_mask：非padding位置为1
-                            pad_id = getattr(self.model.config, 'pad_token_id', None) if hasattr(self.model, 'config') else None
-                            if pad_id is None:
-                                # 如果没有pad_token_id，假设所有非0位置都是有效token
-                                attention_mask = (input_ids != 0).long()
-                            else:
-                                attention_mask = (input_ids != pad_id).long()
-                    else:
-                        # 完全重新创建
-                        pad_id = getattr(self.model.config, 'pad_token_id', None) if hasattr(self.model, 'config') else None
-                        if pad_id is None:
-                            attention_mask = (input_ids != 0).long()
-                        else:
-                            attention_mask = (input_ids != pad_id).long()
-                    
-                    logger.info(f"修复后的attention_mask shape: {attention_mask.shape}")
+                    logger.warning(f"attention_mask shape不匹配，重新创建...")
+                    pad_id = getattr(self.model.config, 'pad_token_id', 0)
+                    attention_mask = (input_ids != pad_id).long()
                 
-                # 验证attention_mask值（应该是0或1）
-                unique_values = torch.unique(attention_mask)
-                invalid_values = unique_values[(unique_values != 0) & (unique_values != 1)]
-                if len(invalid_values) > 0:
-                    logger.warning(
-                        f"attention_mask包含非法值: {invalid_values.tolist()}，"
-                        f"将clamp到[0, 1]范围"
-                    )
-                    attention_mask = torch.clamp(attention_mask, 0, 1).long()
+                # 验证值（在CPU上）
+                attention_mask_cpu = attention_mask.cpu()
+                unique_values = torch.unique(attention_mask_cpu)
+                if not all(v in [0, 1] for v in unique_values.tolist()):
+                    logger.warning(f"attention_mask包含非法值，修复中...")
+                    attention_mask = torch.clamp(attention_mask_cpu, 0, 1).long()
                 
                 prepared_batch['attention_mask'] = attention_mask.to(self.device)
             
-            # 验证labels（如果存在）
+            # ===== 关键：处理 decoder_attention_mask =====
+            if 'decoder_attention_mask' in batch:
+                decoder_attention_mask = batch['decoder_attention_mask']
+                if isinstance(decoder_attention_mask, torch.Tensor):
+                    decoder_attention_mask_cpu = decoder_attention_mask.cpu()
+                    unique_values = torch.unique(decoder_attention_mask_cpu)
+                    if not all(v in [0, 1] for v in unique_values.tolist()):
+                        logger.warning(f"decoder_attention_mask包含非法值，修复中...")
+                        decoder_attention_mask = torch.clamp(decoder_attention_mask_cpu, 0, 1).long()
+                    prepared_batch['decoder_attention_mask'] = decoder_attention_mask.to(self.device)
+            
+            # 处理 labels
             if 'labels' in batch:
                 labels = batch['labels']
                 if isinstance(labels, torch.Tensor):
                     if labels.shape != input_ids.shape:
-                        logger.warning(
-                            f"labels shape {labels.shape} 与 input_ids shape {input_ids.shape} 不匹配"
-                        )
-                        # 尝试修复：如果维度不匹配
+                        logger.warning(f"labels shape {labels.shape} 与 input_ids shape {input_ids.shape} 不匹配")
                         if labels.dim() == 1 and len(labels) == seq_len:
                             labels = labels.unsqueeze(0).expand(batch_size, -1)
                         elif labels.dim() == 2 and labels.size(0) == batch_size and labels.size(1) != seq_len:
-                            # 如果seq_len不匹配，可能需要padding或truncation
-                            logger.error(f"无法修复labels shape不匹配: {labels.shape} vs {input_ids.shape}")
-                            raise ValueError(f"labels shape不匹配: {labels.shape} vs {input_ids.shape}")
+                            # 对于BLIP，labels可能是answer的token ids，长度可能不同
+                            logger.info(f"labels长度与input_ids不同，这对BLIP是正常的")
+                    
+                    # 验证labels值（在CPU上）
+                    labels_cpu = labels.cpu()
+                    valid_labels = labels_cpu[labels_cpu != -100]
+                    if len(valid_labels) > 0:
+                        max_label = valid_labels.max().item()
+                        min_label = valid_labels.min().item()
+                        
+                        logger.info(f"📊 labels统计: min={min_label}, max={max_label} (忽略-100)")
+                        
+                        if effective_vocab_size is not None:
+                            if max_label >= effective_vocab_size or min_label < 0:
+                                logger.error(f"❌ labels超出范围: [{min_label}, {max_label}] vs [0, {effective_vocab_size-1}]")
+                                logger.warning(f"   🔧 将非法labels设置为-100...")
+                                
+                                # 创建mask并替换
+                                mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
+                                labels_cpu[mask] = -100
+                                labels = labels_cpu
+                                
+                                logger.info(f"   ✅ labels修复完成")
+                    
                     prepared_batch['labels'] = labels.to(self.device)
-            
-            prepared_batch['input_ids'] = input_ids.to(self.device)
         
         # 处理其他字段
         for key, value in batch.items():
-            if key not in prepared_batch:  # 避免重复处理
+            if key not in prepared_batch:
                 if isinstance(value, torch.Tensor):
                     prepared_batch[key] = value.to(self.device)
                 elif isinstance(value, (list, tuple)) and len(value) > 0 and isinstance(value[0], torch.Tensor):
-                    # 处理tensor列表（如pixel_values的batch）
                     prepared_batch[key] = [v.to(self.device) for v in value]
                 else:
                     prepared_batch[key] = value
-        
-        # 最终验证：确保所有tensor都在同一设备上
-        for key, value in prepared_batch.items():
-            if isinstance(value, torch.Tensor) and value.device != self.device:
-                logger.warning(f"{key}不在正确设备上: {value.device} vs {self.device}，移动到{self.device}")
-                prepared_batch[key] = value.to(self.device)
         
         return prepared_batch
     
