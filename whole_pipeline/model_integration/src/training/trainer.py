@@ -240,6 +240,14 @@ class Trainer:
             self._call_callbacks('on_batch_begin', batch=batch_idx)
             
             try:
+                # 保存原始batch的CPU副本（用于错误诊断）
+                batch_cpu_backup = {}
+                for key, value in batch.items():
+                    if isinstance(value, torch.Tensor):
+                        batch_cpu_backup[key] = value.cpu().clone() if value.is_cuda else value.clone()
+                    else:
+                        batch_cpu_backup[key] = value
+                
                 # 准备输入（包含验证和修复）
                 # 注意：在CPU上完成所有验证和修复，然后再移动到GPU
                 batch = self._prepare_batch(batch)
@@ -256,35 +264,86 @@ class Trainer:
                     debug_logger.error("=" * 80)
                     debug_logger.error(f"CUDA错误在batch {batch_idx}: {e}")
                     debug_logger.error("=" * 80)
-                    debug_logger.error("尝试在CPU上检查batch（如果可能）...")
                     
-                    # 尝试获取原始batch（在移动到GPU之前）
-                    # 如果batch已经在GPU上且CUDA错误，可能无法移动回CPU
-                    # 所以我们需要在_prepare_batch之前保存一份CPU副本
-                    try:
-                        # 尝试将tensor移回CPU检查
-                        batch_cpu = {}
-                        for key, value in batch.items():
+                    # 使用保存的CPU备份进行检查
+                    if 'batch_cpu_backup' in locals():
+                        debug_logger.error("使用保存的CPU备份检查batch...")
+                        vocab_size = None
+                        text_vocab_size = None
+                        if hasattr(self.model, 'config'):
+                            vocab_size = getattr(self.model.config, 'vocab_size', None)
+                            if hasattr(self.model.config, 'text_config'):
+                                text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
+                        effective_vocab_size = text_vocab_size or vocab_size
+                        
+                        for key, value in batch_cpu_backup.items():
                             if isinstance(value, torch.Tensor):
-                                try:
-                                    # 使用detach()和cpu()，避免梯度问题
-                                    value_cpu = value.detach().cpu()
-                                    batch_cpu[key] = value_cpu
-                                    debug_logger.error(f"  {key}:")
-                                    debug_logger.error(f"    shape: {value.shape}")
-                                    debug_logger.error(f"    dtype: {value.dtype}")
-                                    debug_logger.error(f"    device: {value.device}")
-                                    if 'ids' in key.lower() or 'mask' in key.lower():
-                                        debug_logger.error(f"    min: {value_cpu.min().item()}")
-                                        debug_logger.error(f"    max: {value_cpu.max().item()}")
-                                        if value.numel() < 100:
-                                            debug_logger.error(f"    values: {value_cpu.tolist()}")
-                                except Exception as inner_e:
-                                    debug_logger.error(f"  {key}: 无法移动到CPU检查 - {inner_e}")
+                                debug_logger.error(f"  {key}:")
+                                debug_logger.error(f"    shape: {value.shape}")
+                                debug_logger.error(f"    dtype: {value.dtype}")
+                                debug_logger.error(f"    device: {value.device}")
+                                
+                                if 'id' in key.lower():
+                                    min_val = value.min().item()
+                                    max_val = value.max().item()
+                                    debug_logger.error(f"    min: {min_val}, max: {max_val}")
+                                    
+                                    if key == 'labels':
+                                        # 检查labels的有效值（忽略-100）
+                                        valid_values = value[value != -100]
+                                        if len(valid_values) > 0:
+                                            min_valid = valid_values.min().item()
+                                            max_valid = valid_values.max().item()
+                                            debug_logger.error(f"    有效值范围（忽略-100）: [{min_valid}, {max_valid}]")
+                                            
+                                            if effective_vocab_size:
+                                                if max_valid >= effective_vocab_size or min_valid < 0:
+                                                    debug_logger.error(f"    ❌ 发现非法token ID: [{min_valid}, {max_valid}] vs vocab_size={effective_vocab_size}")
+                                                    # 找出所有非法值的位置
+                                                    invalid_mask = (value != -100) & ((value < 0) | (value >= effective_vocab_size))
+                                                    invalid_count = invalid_mask.sum().item()
+                                                    debug_logger.error(f"    非法值数量: {invalid_count}")
+                                                    if invalid_count > 0 and invalid_count < 100:
+                                                        invalid_values = value[invalid_mask].unique().tolist()
+                                                        debug_logger.error(f"    非法值列表: {invalid_values}")
+                                    else:
+                                        # input_ids或decoder_input_ids
+                                        if effective_vocab_size:
+                                            if max_val >= effective_vocab_size or min_val < 0:
+                                                debug_logger.error(f"    ❌ 发现非法token ID: [{min_val}, {max_val}] vs vocab_size={effective_vocab_size}")
+                                                invalid_mask = (value < 0) | (value >= effective_vocab_size)
+                                                invalid_count = invalid_mask.sum().item()
+                                                debug_logger.error(f"    非法值数量: {invalid_count}")
+                                                if invalid_count > 0 and invalid_count < 100:
+                                                    invalid_values = value[invalid_mask].unique().tolist()
+                                                    debug_logger.error(f"    非法值列表: {invalid_values}")
+                                
+                                if 'mask' in key.lower():
+                                    unique_values = value.unique().tolist()
+                                    debug_logger.error(f"    唯一值: {unique_values}")
+                                    invalid_values = [v for v in unique_values if v not in [0, 1]]
+                                    if invalid_values:
+                                        debug_logger.error(f"    ❌ 发现非法值（不是0或1）: {invalid_values}")
+                                
+                                # 如果tensor不大，打印所有值
+                                if value.numel() < 200:
+                                    debug_logger.error(f"    所有值: {value.tolist()}")
                             else:
                                 debug_logger.error(f"  {key}: {type(value)} = {value}")
-                    except Exception as check_e:
-                        debug_logger.error(f"无法检查batch详情: {check_e}")
+                    else:
+                        debug_logger.error("无法获取CPU备份，尝试检查GPU上的batch...")
+                        try:
+                            for key, value in batch.items():
+                                if isinstance(value, torch.Tensor):
+                                    try:
+                                        value_cpu = value.detach().cpu()
+                                        debug_logger.error(f"  {key}: shape={value.shape}, device={value.device}")
+                                        if 'ids' in key.lower():
+                                            debug_logger.error(f"    min={value_cpu.min().item()}, max={value_cpu.max().item()}")
+                                    except Exception as inner_e:
+                                        debug_logger.error(f"  {key}: 无法移动到CPU检查 - {inner_e}")
+                        except Exception as check_e:
+                            debug_logger.error(f"无法检查batch详情: {check_e}")
                     
                     debug_logger.error("=" * 80)
                     debug_logger.error("建议：检查数据加载和_prepare_batch中的验证逻辑")
@@ -636,24 +695,38 @@ class Trainer:
                     else:
                         labels_cpu = labels.clone()
                     
-                    valid_labels = labels_cpu[labels_cpu != -100]
-                    if len(valid_labels) > 0:
-                        max_label = valid_labels.max().item()
-                        min_label = valid_labels.min().item()
+                    # 强制修复：确保所有非-100的labels都在有效范围内
+                    if effective_vocab_size is not None:
+                        # 找出所有非法值
+                        invalid_mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
+                        invalid_count = invalid_mask.sum().item()
                         
-                        debug_logger.info(f"📊 labels统计: min={min_label}, max={max_label} (忽略-100)")
-                        
-                        if effective_vocab_size is not None:
-                            if max_label >= effective_vocab_size or min_label < 0:
-                                debug_logger.error(f"❌ labels超出范围: [{min_label}, {max_label}] vs [0, {effective_vocab_size-1}]")
-                                debug_logger.warning(f"   🔧 将非法labels设置为-100...")
-                                
-                                # 创建mask并替换
-                                mask = (labels_cpu != -100) & ((labels_cpu < 0) | (labels_cpu >= effective_vocab_size))
-                                labels_cpu[mask] = -100
-                                labels = labels_cpu
-                                
-                                debug_logger.info(f"   ✅ labels修复完成")
+                        if invalid_count > 0:
+                            debug_logger.error(f"❌ 发现 {invalid_count} 个非法labels值")
+                            invalid_values = labels_cpu[invalid_mask].unique()
+                            debug_logger.error(f"   非法值范围: [{invalid_values.min().item()}, {invalid_values.max().item()}]")
+                            debug_logger.error(f"   vocab_size: {effective_vocab_size}")
+                            debug_logger.warning(f"   🔧 将所有非法labels设置为-100...")
+                            
+                            # 将所有非法值设置为-100
+                            labels_cpu[invalid_mask] = -100
+                            labels = labels_cpu
+                            
+                            # 验证修复后
+                            valid_labels = labels_cpu[labels_cpu != -100]
+                            if len(valid_labels) > 0:
+                                max_label = valid_labels.max().item()
+                                min_label = valid_labels.min().item()
+                                debug_logger.info(f"   ✅ labels修复后: min={min_label}, max={max_label} (忽略-100)")
+                            else:
+                                debug_logger.warning(f"   ⚠️  修复后所有labels都是-100，这可能表示数据有问题")
+                        else:
+                            # 即使没有非法值，也记录统计信息
+                            valid_labels = labels_cpu[labels_cpu != -100]
+                            if len(valid_labels) > 0:
+                                max_label = valid_labels.max().item()
+                                min_label = valid_labels.min().item()
+                                debug_logger.info(f"📊 labels统计: min={min_label}, max={max_label} (忽略-100)")
                     
                     # 确保labels在CPU上，然后再移动到GPU
                     if labels.is_cuda:
