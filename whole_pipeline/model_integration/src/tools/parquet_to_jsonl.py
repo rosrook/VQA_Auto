@@ -139,7 +139,10 @@ def write_markdown(samples: List[Dict[str, str]], path: Path, top_k: int = 3):
         lines.append(f"## Sample {idx}")
         lines.append(f"- **Question:** {s['question'].replace(chr(10), '<br>')}")
         lines.append(f"- **Answer:** {s['answer']}")
-        lines.append(f"- **Image:**\n\n![]({s['image']})\n")
+        # 使用HTML img标签避免在Markdown正文中展示base64文本
+        lines.append("- **Image:**")
+        lines.append(f'<img src="{s["image"]}" alt="sample image" style="max-width:320px;"/>')
+        lines.append("")  # 空行分隔
     path.write_text("\n".join(lines), encoding="utf-8")
 
 
