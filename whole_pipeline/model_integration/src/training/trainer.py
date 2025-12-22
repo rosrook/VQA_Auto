@@ -241,7 +241,11 @@ class Trainer:
             
             try:
                 # 准备输入（包含验证和修复）
+                # 注意：在CPU上完成所有验证和修复，然后再移动到GPU
                 batch = self._prepare_batch(batch)
+                
+                # 在移动到GPU后，再次验证（如果可能）
+                self._validate_batch_on_device(batch, batch_idx)
                 
                 # 前向传播
                 loss = self._train_step(batch)
@@ -252,25 +256,38 @@ class Trainer:
                     debug_logger.error("=" * 80)
                     debug_logger.error(f"CUDA错误在batch {batch_idx}: {e}")
                     debug_logger.error("=" * 80)
-                    debug_logger.error("Batch详细内容:")
-                    for key, value in batch.items():
-                        if isinstance(value, torch.Tensor):
-                            # 移动到CPU再检查，避免CUDA错误
-                            try:
-                                value_cpu = value.cpu()
-                                debug_logger.error(f"  {key}:")
-                                debug_logger.error(f"    shape: {value.shape}")
-                                debug_logger.error(f"    dtype: {value.dtype}")
-                                debug_logger.error(f"    device: {value.device}")
-                                if 'ids' in key.lower() or 'mask' in key.lower():
-                                    debug_logger.error(f"    min: {value_cpu.min().item()}")
-                                    debug_logger.error(f"    max: {value_cpu.max().item()}")
-                                    if value.numel() < 100:
-                                        debug_logger.error(f"    values: {value_cpu.tolist()}")
-                            except Exception as inner_e:
-                                debug_logger.error(f"  {key}: 无法检查详情 - {inner_e}")
-                        else:
-                            debug_logger.error(f"  {key}: {type(value)} = {value}")
+                    debug_logger.error("尝试在CPU上检查batch（如果可能）...")
+                    
+                    # 尝试获取原始batch（在移动到GPU之前）
+                    # 如果batch已经在GPU上且CUDA错误，可能无法移动回CPU
+                    # 所以我们需要在_prepare_batch之前保存一份CPU副本
+                    try:
+                        # 尝试将tensor移回CPU检查
+                        batch_cpu = {}
+                        for key, value in batch.items():
+                            if isinstance(value, torch.Tensor):
+                                try:
+                                    # 使用detach()和cpu()，避免梯度问题
+                                    value_cpu = value.detach().cpu()
+                                    batch_cpu[key] = value_cpu
+                                    debug_logger.error(f"  {key}:")
+                                    debug_logger.error(f"    shape: {value.shape}")
+                                    debug_logger.error(f"    dtype: {value.dtype}")
+                                    debug_logger.error(f"    device: {value.device}")
+                                    if 'ids' in key.lower() or 'mask' in key.lower():
+                                        debug_logger.error(f"    min: {value_cpu.min().item()}")
+                                        debug_logger.error(f"    max: {value_cpu.max().item()}")
+                                        if value.numel() < 100:
+                                            debug_logger.error(f"    values: {value_cpu.tolist()}")
+                                except Exception as inner_e:
+                                    debug_logger.error(f"  {key}: 无法移动到CPU检查 - {inner_e}")
+                            else:
+                                debug_logger.error(f"  {key}: {type(value)} = {value}")
+                    except Exception as check_e:
+                        debug_logger.error(f"无法检查batch详情: {check_e}")
+                    
+                    debug_logger.error("=" * 80)
+                    debug_logger.error("建议：检查数据加载和_prepare_batch中的验证逻辑")
                     debug_logger.error("=" * 80)
                     
                     # 控制台只输出简要信息
@@ -494,8 +511,13 @@ class Trainer:
             
             batch_size, seq_len = input_ids.shape
             
-            # 在CPU上验证
-            input_ids_cpu = input_ids.cpu()
+            # 在CPU上验证（确保在移动到GPU前完成所有修复）
+            # 如果input_ids已经在GPU上，先移回CPU
+            if input_ids.is_cuda:
+                input_ids_cpu = input_ids.cpu()
+            else:
+                input_ids_cpu = input_ids.clone()
+            
             max_id = input_ids_cpu.max().item()
             min_id = input_ids_cpu.min().item()
             
@@ -517,13 +539,21 @@ class Trainer:
                     
                     debug_logger.info(f"   ✅ 修复后: min={input_ids.min().item()}, max={input_ids.max().item()}")
             
+            # 确保input_ids在CPU上，然后再移动到GPU
+            if input_ids.is_cuda:
+                input_ids = input_ids.cpu()
             prepared_batch['input_ids'] = input_ids.to(self.device)
             
             # ===== 关键：处理 decoder_input_ids (BLIP特有) =====
             if 'decoder_input_ids' in batch:
                 decoder_input_ids = batch['decoder_input_ids']
                 if isinstance(decoder_input_ids, torch.Tensor):
-                    decoder_input_ids_cpu = decoder_input_ids.cpu()
+                    # 确保在CPU上处理
+                    if decoder_input_ids.is_cuda:
+                        decoder_input_ids_cpu = decoder_input_ids.cpu()
+                    else:
+                        decoder_input_ids_cpu = decoder_input_ids.clone()
+                    
                     max_dec_id = decoder_input_ids_cpu.max().item()
                     min_dec_id = decoder_input_ids_cpu.min().item()
                     
@@ -537,6 +567,9 @@ class Trainer:
                             decoder_input_ids = decoder_input_ids_cpu
                             debug_logger.info(f"   ✅ decoder修复后: min={decoder_input_ids.min().item()}, max={decoder_input_ids.max().item()}")
                     
+                    # 确保在CPU上，然后再移动到GPU
+                    if decoder_input_ids.is_cuda:
+                        decoder_input_ids = decoder_input_ids.cpu()
                     prepared_batch['decoder_input_ids'] = decoder_input_ids.to(self.device)
             
             # 处理 attention_mask
@@ -549,15 +582,26 @@ class Trainer:
                 if attention_mask.shape != input_ids.shape:
                     debug_logger.warning(f"attention_mask shape不匹配，重新创建...")
                     pad_id = getattr(self.model.config, 'pad_token_id', 0)
-                    attention_mask = (input_ids != pad_id).long()
+                    # 使用CPU上的input_ids创建attention_mask
+                    input_ids_for_mask = prepared_batch.get('input_ids', input_ids)
+                    if input_ids_for_mask.is_cuda:
+                        input_ids_for_mask = input_ids_for_mask.cpu()
+                    attention_mask = (input_ids_for_mask != pad_id).long()
                 
                 # 验证值（在CPU上）
-                attention_mask_cpu = attention_mask.cpu()
+                if attention_mask.is_cuda:
+                    attention_mask_cpu = attention_mask.cpu()
+                else:
+                    attention_mask_cpu = attention_mask.clone()
+                
                 unique_values = torch.unique(attention_mask_cpu)
                 if not all(v in [0, 1] for v in unique_values.tolist()):
                     debug_logger.warning(f"attention_mask包含非法值，修复中...")
                     attention_mask = torch.clamp(attention_mask_cpu, 0, 1).long()
                 
+                # 确保在CPU上，然后再移动到GPU
+                if attention_mask.is_cuda:
+                    attention_mask = attention_mask.cpu()
                 prepared_batch['attention_mask'] = attention_mask.to(self.device)
             
             # ===== 关键：处理 decoder_attention_mask =====
@@ -585,8 +629,13 @@ class Trainer:
                             # 对于BLIP，labels可能是answer的token ids，长度可能不同
                             debug_logger.info(f"labels长度与input_ids不同，这对BLIP是正常的")
                     
-                    # 验证labels值（在CPU上）
-                    labels_cpu = labels.cpu()
+                    # 验证labels值（在CPU上，确保在移动到GPU前完成所有修复）
+                    # 如果labels已经在GPU上，先移回CPU
+                    if labels.is_cuda:
+                        labels_cpu = labels.cpu()
+                    else:
+                        labels_cpu = labels.clone()
+                    
                     valid_labels = labels_cpu[labels_cpu != -100]
                     if len(valid_labels) > 0:
                         max_label = valid_labels.max().item()
@@ -606,6 +655,9 @@ class Trainer:
                                 
                                 debug_logger.info(f"   ✅ labels修复完成")
                     
+                    # 确保labels在CPU上，然后再移动到GPU
+                    if labels.is_cuda:
+                        labels = labels.cpu()
                     prepared_batch['labels'] = labels.to(self.device)
         
         # 处理其他字段
@@ -619,6 +671,59 @@ class Trainer:
                     prepared_batch[key] = value
         
         return prepared_batch
+    
+    def _validate_batch_on_device(self, batch: Dict[str, Any], batch_idx: int):
+        """
+        在GPU上验证batch（如果可能）
+        
+        注意：这个方法在batch已经移动到GPU后调用，主要用于最后的检查
+        """
+        debug_logger = get_debug_logger()
+        
+        # 获取vocab_size
+        vocab_size = None
+        text_vocab_size = None
+        if hasattr(self.model, 'config'):
+            vocab_size = getattr(self.model.config, 'vocab_size', None)
+            if hasattr(self.model.config, 'text_config'):
+                text_vocab_size = getattr(self.model.config.text_config, 'vocab_size', None)
+        
+        effective_vocab_size = text_vocab_size or vocab_size
+        
+        # 只检查关键字段，避免频繁的CPU-GPU传输
+        if batch_idx == 0:  # 只在第一个batch时详细检查
+            for key in ['input_ids', 'labels', 'attention_mask']:
+                if key in batch and isinstance(batch[key], torch.Tensor):
+                    tensor = batch[key]
+                    try:
+                        # 尝试在GPU上检查（如果可能）
+                        if tensor.is_cuda:
+                            # 对于CUDA tensor，先尝试在GPU上检查min/max
+                            # 如果失败，说明tensor可能已经损坏
+                            try:
+                                max_val = tensor.max().item()
+                                min_val = tensor.min().item()
+                                
+                                if key == 'labels':
+                                    # labels可以是-100
+                                    valid_tensor = tensor[tensor != -100]
+                                    if len(valid_tensor) > 0:
+                                        max_valid = valid_tensor.max().item()
+                                        min_valid = valid_tensor.min().item()
+                                        
+                                        if effective_vocab_size and (max_valid >= effective_vocab_size or min_valid < 0):
+                                            debug_logger.error(
+                                                f"⚠️  GPU上的{key}包含非法值: [{min_valid}, {max_valid}] vs vocab_size={effective_vocab_size}"
+                                            )
+                                else:
+                                    if effective_vocab_size and (max_val >= effective_vocab_size or min_val < 0):
+                                        debug_logger.error(
+                                            f"⚠️  GPU上的{key}包含非法值: [{min_val}, {max_val}] vs vocab_size={effective_vocab_size}"
+                                        )
+                            except RuntimeError as e:
+                                debug_logger.warning(f"无法在GPU上检查{key}: {e}")
+                    except Exception as e:
+                        debug_logger.warning(f"检查{key}时出错: {e}")
     
     def validate_first_batch(self):
         """
